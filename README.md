@@ -90,10 +90,8 @@ std::vector<unsigned int> compress_vertices(std::vector<float> vertices) {
     }
 
     return result;
-}```
-
-```cpp
-`uint32_t pack_rgba_to_argb(float r, float g, float b, float a) {
+}
+uint32_t pack_rgba_to_argb(float r, float g, float b, float a) {
     uint8_t ri = (uint8_t)(r * 255.0f + 0.5f);
     uint8_t gi = (uint8_t)(g * 255.0f + 0.5f);
     uint8_t bi = (uint8_t)(b * 255.0f + 0.5f);
@@ -103,19 +101,26 @@ std::vector<unsigned int> compress_vertices(std::vector<float> vertices) {
         | ((uint32_t)ri << 16)
         | ((uint32_t)gi << 8)
         | (uint32_t)bi;
-}```
+}
+```
 
 CODE (unpacking, vs.hlsl, ps.hlsl):
 
 vs.hlsl:
-`float2 xy = unpack_uint_to_2float16(positions_colors[offset]);
-float z = unpack_uint_to_2float16(positions_colors[offset + 1]).x;`
+```
+float2 xy = unpack_uint_to_2float16(positions_colors[offset]);
+float z = unpack_uint_to_2float16(positions_colors[offset + 1]).x;
+```
 
-`output.position = float4(xy, z, 1.0f);
+```
+output.position = float4(xy, z, 1.0f);
 output.color = positions_colors[offset + 2];`
+```
 -----------------------------------------------
 ps.hlsl:
-`return float4(unpackARGB(input.color).xyz, 1.0f);`
+```
+return float4(unpackARGB(input.color).xyz, 1.0f);
+```
 
 Buffers:
 
