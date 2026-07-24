@@ -68,16 +68,18 @@ memory usage and time sending memory to the processing cores which especially he
 The code and format for it (for programmers):
 
 UNCOMPRESSED:
+```
 triangle:
 v1: x (float32), y (float32), z (float32), r (float32), g (float32), b (float32), a (float32)
 v2: x (float32), y (float32), z (float32), r (float32), g (float32), b (float32), a (float32)
 v3: x (float32), y (float32), z (float32), r (float32), g (float32), b (float32), a (float32)
-
+```
+```
 COMPRESSED:
 v1: xy (uint32 containing 2xfloat16, x, y), z0 (uint32 containing 1xfloat16, z, and binary 0000000000000000), ARGB (uint32)
 v2: xy (uint32 containing 2xfloat16, x, y), z0 (uint32 containing 1xfloat16, z, and binary 0000000000000000), ARGB (uint32)
 v3: xy (uint32 containing 2xfloat16, x, y), z0 (uint32 containing 1xfloat16, z, and binary 0000000000000000), ARGB (uint32)
-
+```
 CODE (packing, utils.hpp):
 ```cpp
 std::vector<unsigned int> compress_vertices(std::vector<float> vertices) {
