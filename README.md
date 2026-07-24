@@ -1,6 +1,6 @@
-THINGS:
+DISCLAIMERS:
 
-You need to be on a windows x86 PC running windows 7, 8, 8.1, 10 or 11. An x86 PC is one that has an Intel or AMD CPU with a DirectX 11 capable GPU. 
+You need to be on a windows x86 PC running windows 7, 8, 8.1, 10 or 11. An x86 PC is one that has an Intel or AMD CPU with a DirectX 11 capable GPU that supports shader model sm_5_0. 
 The hello.world vertex data file is MASSIVE, and I can't add it here, I only have a placeholder for one triangle, therefore I have added the "AI generated random GPU killer.py" file
 to have you generate your own (performance might vary due to the differences in meshes).
 
