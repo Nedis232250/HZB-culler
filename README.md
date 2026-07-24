@@ -79,7 +79,8 @@ v2: xy (uint32 containing 2xfloat16, x, y), z0 (uint32 containing 1xfloat16, z, 
 v3: xy (uint32 containing 2xfloat16, x, y), z0 (uint32 containing 1xfloat16, z, and binary 0000000000000000), ARGB (uint32)
 
 CODE (packing, utils.hpp):
-`std::vector<unsigned int> compress_vertices(std::vector<float> vertices) {
+```cpp
+std::vector<unsigned int> compress_vertices(std::vector<float> vertices) {
     std::vector<unsigned int> result;
 
     for (unsigned int i = 0; i < vertices.size(); i += 7) {
@@ -89,8 +90,9 @@ CODE (packing, utils.hpp):
     }
 
     return result;
-}`
+}```
 
+```cpp
 `uint32_t pack_rgba_to_argb(float r, float g, float b, float a) {
     uint8_t ri = (uint8_t)(r * 255.0f + 0.5f);
     uint8_t gi = (uint8_t)(g * 255.0f + 0.5f);
@@ -101,7 +103,7 @@ CODE (packing, utils.hpp):
         | ((uint32_t)ri << 16)
         | ((uint32_t)gi << 8)
         | (uint32_t)bi;
-}`
+}```
 
 CODE (unpacking, vs.hlsl, ps.hlsl):
 
