@@ -1,0 +1,190 @@
+
+        Texture2D<float> mip_src_tex : register(t0);
+        RWTexture2D<float> mip_dst_tex : register(u0);
+
+        [numthreads(32, 4, 1)]
+        void main(uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID) {
+            int2 src_xy = int2(groupID.x * 32 + threadID.x, groupID.y * 4 + threadID.y);
+            int2 src_xy_scale = src_xy * 2;
+            float a = mip_src_tex[src_xy_scale + int2(0, 0)];
+            float b = mip_src_tex[src_xy_scale + int2(1, 0)];
+            float c = mip_src_tex[src_xy_scale + int2(0, 1)];
+            float d = mip_src_tex[src_xy_scale + int2(1, 1)];
+
+            mip_dst_tex[src_xy] = max(max(a, b), max(c, d));
+        }
+    
+[DISPATCHINFO]
+[30, 135]
+[BREAKHERE]
+
+        Texture2D<float> mip_src_tex : register(t0);
+        RWTexture2D<float> mip_dst_tex : register(u0);
+
+        [numthreads(32, 2, 1)]
+        void main(uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID) {
+            int2 src_xy = int2(groupID.x * 32 + threadID.x, groupID.y * 2 + threadID.y);
+            int2 src_xy_scale = src_xy * 2;
+            float a = mip_src_tex[src_xy_scale + int2(0, 0)];
+            float b = mip_src_tex[src_xy_scale + int2(1, 0)];
+            float c = mip_src_tex[src_xy_scale + int2(0, 1)];
+            float d = mip_src_tex[src_xy_scale + int2(1, 1)];
+
+            mip_dst_tex[src_xy] = max(max(a, b), max(c, d));
+        }
+    
+[DISPATCHINFO]
+[15, 135]
+[BREAKHERE]
+
+        Texture2D<float> mip_src_tex : register(t0);
+        RWTexture2D<float> mip_dst_tex : register(u0);
+
+        [numthreads(16, 1, 1)]
+        void main(uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID) {
+            int2 src_xy = int2(groupID.x * 16 + threadID.x, groupID.y * 1 + threadID.y);
+            int2 src_xy_scale = src_xy * 2;
+            float a = mip_src_tex[src_xy_scale + int2(0, 0)];
+            float b = mip_src_tex[src_xy_scale + int2(1, 0)];
+            float c = mip_src_tex[src_xy_scale + int2(0, 1)];
+            float d = mip_src_tex[src_xy_scale + int2(1, 1)];
+
+            mip_dst_tex[src_xy] = max(max(a, b), max(c, d));
+        }
+    
+[DISPATCHINFO]
+[15, 135]
+[BREAKHERE]
+
+        Texture2D<float> mip_src_tex : register(t0);
+        RWTexture2D<float> mip_dst_tex : register(u0);
+
+        [numthreads(8, 1, 1)]
+        void main(uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID) {
+            int2 src_xy = int2(groupID.x * 8 + threadID.x, groupID.y * 1 + threadID.y);
+            int2 src_xy_scale = src_xy * 2;
+            float a = mip_src_tex[src_xy_scale + int2(0, 0)];
+            float b = mip_src_tex[src_xy_scale + int2(1, 0)];
+            float c = mip_src_tex[src_xy_scale + int2(0, 1)];
+            float d = mip_src_tex[src_xy_scale + int2(1, 1)];
+
+            mip_dst_tex[src_xy] = max(max(a, b), max(c, d));
+        }
+    
+[DISPATCHINFO]
+[15, 67]
+[BREAKHERE]
+
+        Texture2D<float> mip_src_tex : register(t0);
+        RWTexture2D<float> mip_dst_tex : register(u0);
+
+        [numthreads(4, 1, 1)]
+        void main(uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID) {
+            int2 src_xy = int2(groupID.x * 4 + threadID.x, groupID.y * 1 + threadID.y);
+            int2 src_xy_scale = src_xy * 2;
+            float a = mip_src_tex[src_xy_scale + int2(0, 0)];
+            float b = mip_src_tex[src_xy_scale + int2(1, 0)];
+            float c = mip_src_tex[src_xy_scale + int2(0, 1)];
+            float d = mip_src_tex[src_xy_scale + int2(1, 1)];
+
+            mip_dst_tex[src_xy] = max(max(a, b), max(c, d));
+        }
+    
+[DISPATCHINFO]
+[15, 33]
+[BREAKHERE]
+
+        Texture2D<float> mip_src_tex : register(t0);
+        RWTexture2D<float> mip_dst_tex : register(u0);
+
+        [numthreads(2, 16, 1)]
+        void main(uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID) {
+            int2 src_xy = int2(groupID.x * 2 + threadID.x, groupID.y * 16 + threadID.y);
+            int2 src_xy_scale = src_xy * 2;
+            float a = mip_src_tex[src_xy_scale + int2(0, 0)];
+            float b = mip_src_tex[src_xy_scale + int2(1, 0)];
+            float c = mip_src_tex[src_xy_scale + int2(0, 1)];
+            float d = mip_src_tex[src_xy_scale + int2(1, 1)];
+
+            mip_dst_tex[src_xy] = max(max(a, b), max(c, d));
+        }
+    
+[DISPATCHINFO]
+[15, 1]
+[BREAKHERE]
+
+        Texture2D<float> mip_src_tex : register(t0);
+        RWTexture2D<float> mip_dst_tex : register(u0);
+
+        [numthreads(1, 8, 1)]
+        void main(uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID) {
+            int2 src_xy = int2(groupID.x * 1 + threadID.x, groupID.y * 8 + threadID.y);
+            int2 src_xy_scale = src_xy * 2;
+            float a = mip_src_tex[src_xy_scale + int2(0, 0)];
+            float b = mip_src_tex[src_xy_scale + int2(1, 0)];
+            float c = mip_src_tex[src_xy_scale + int2(0, 1)];
+            float d = mip_src_tex[src_xy_scale + int2(1, 1)];
+
+            mip_dst_tex[src_xy] = max(max(a, b), max(c, d));
+        }
+    
+[DISPATCHINFO]
+[15, 1]
+[BREAKHERE]
+
+        Texture2D<float> mip_src_tex : register(t0);
+        RWTexture2D<float> mip_dst_tex : register(u0);
+
+        [numthreads(1, 4, 1)]
+        void main(uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID) {
+            int2 src_xy = int2(groupID.x * 1 + threadID.x, groupID.y * 4 + threadID.y);
+            int2 src_xy_scale = src_xy * 2;
+            float a = mip_src_tex[src_xy_scale + int2(0, 0)];
+            float b = mip_src_tex[src_xy_scale + int2(1, 0)];
+            float c = mip_src_tex[src_xy_scale + int2(0, 1)];
+            float d = mip_src_tex[src_xy_scale + int2(1, 1)];
+
+            mip_dst_tex[src_xy] = max(max(a, b), max(c, d));
+        }
+    
+[DISPATCHINFO]
+[7, 1]
+[BREAKHERE]
+
+        Texture2D<float> mip_src_tex : register(t0);
+        RWTexture2D<float> mip_dst_tex : register(u0);
+
+        [numthreads(1, 2, 1)]
+        void main(uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID) {
+            int2 src_xy = int2(groupID.x * 1 + threadID.x, groupID.y * 2 + threadID.y);
+            int2 src_xy_scale = src_xy * 2;
+            float a = mip_src_tex[src_xy_scale + int2(0, 0)];
+            float b = mip_src_tex[src_xy_scale + int2(1, 0)];
+            float c = mip_src_tex[src_xy_scale + int2(0, 1)];
+            float d = mip_src_tex[src_xy_scale + int2(1, 1)];
+
+            mip_dst_tex[src_xy] = max(max(a, b), max(c, d));
+        }
+    
+[DISPATCHINFO]
+[3, 1]
+[BREAKHERE]
+
+        Texture2D<float> mip_src_tex : register(t0);
+        RWTexture2D<float> mip_dst_tex : register(u0);
+
+        [numthreads(1, 1, 1)]
+        void main(uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID) {
+            int2 src_xy = int2(groupID.x * 1 + threadID.x, groupID.y * 1 + threadID.y);
+            int2 src_xy_scale = src_xy * 2;
+            float a = mip_src_tex[src_xy_scale + int2(0, 0)];
+            float b = mip_src_tex[src_xy_scale + int2(1, 0)];
+            float c = mip_src_tex[src_xy_scale + int2(0, 1)];
+            float d = mip_src_tex[src_xy_scale + int2(1, 1)];
+
+            mip_dst_tex[src_xy] = max(max(a, b), max(c, d));
+        }
+    
+[DISPATCHINFO]
+[1, 1]
+[BREAKHERE]
