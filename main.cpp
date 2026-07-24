@@ -27,7 +27,7 @@ constexpr static unsigned int zero = 0;
 // CONSTANTS
 //
 
-constexpr static bool debug = true;
+constexpr static bool debug = false;
 constexpr static bool console = false;
 constexpr static bool occlusion = true;
 constexpr static bool generate_shaders = false;
