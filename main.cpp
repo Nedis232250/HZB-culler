@@ -30,7 +30,7 @@ constexpr static unsigned int zero = 0;
 constexpr static bool debug = false;
 constexpr static bool console = false;
 constexpr static bool occlusion = true;
-constexpr static bool generate_shaders = false;
+constexpr static bool generate_shaders = true;
 constexpr static ID3D11UnorderedAccessView* nullUAVs[] = { nullptr };
 constexpr static ID3D11ShaderResourceView* nullSRVs[] = { nullptr, nullptr };
 
