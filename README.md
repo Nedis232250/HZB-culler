@@ -124,7 +124,7 @@ return float4(unpackARGB(input.color).xyz, 1.0f);
 
 Buffers:
 
-Buffers are fancy words for chunks of memory allocated on the GPU. The main "vertex buffer" (ComPtr<ID3D11Buffer> vertex_buffer) is the chunk 
+Buffers are fancy words for chunks of memory allocated on the GPU. The main "vertex buffer" (ComPtr\<ID3D11Buffer\> vertex_buffer) is the chunk 
 of memory that stores the vertex position and color data. The "dimensions buffer" (ComPtr<ID3D11Buffer> dimensions_buffer) is the chunk of memory
 responsible for housing the window's width and height. The "triangle status buffer" (ComPtr<ID3D11Buffer> status_buffer) is the chunk of memory responsible
 for housing every visible triangle's ID (each triangle has an "ID" that is it's position in memory, for example an ID of X means the triangle data starts at
