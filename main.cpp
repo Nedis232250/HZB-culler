@@ -31,6 +31,7 @@ constexpr static bool debug = false;
 constexpr static bool console = false;
 constexpr static bool occlusion = true;
 constexpr static bool generate_shaders = true;
+constexpr static bool occluder_occludee = true;
 constexpr static ID3D11UnorderedAccessView* nullUAVs[] = { nullptr };
 constexpr static ID3D11ShaderResourceView* nullSRVs[] = { nullptr, nullptr };
 
@@ -375,6 +376,8 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 	ComPtr<ID3DBlob> cull_blob;
 	ComPtr<ID3D11VertexShader> nocull_vs;
 	ComPtr<ID3DBlob> nocull_blob;
+	ComPtr<ID3D11ComputeShader> occluder_shader;
+	ComPtr<ID3DBlob> occluder_blob;
 	ComPtr<ID3DBlob> error_blob;
 
 	HRESULT hr;
@@ -414,10 +417,20 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 		return -1;
 	}
 
+	hr = D3DCompileFromFile(L"occluder.hlsl", nullptr, nullptr, "main", "cs_5_0", compile_flags, 0, &occluder_blob, &error_blob);
+	if (FAILED(hr)) {
+		if (error_blob.Get()->GetBufferSize() > 0) {
+			OutputDebugStringA((const char*)error_blob.Get()->GetBufferPointer());
+		}
+
+		return -1;
+	}
+
 	device->CreateVertexShader(vs_blob.Get()->GetBufferPointer(), vs_blob.Get()->GetBufferSize(), nullptr, &vs);
 	device->CreatePixelShader(ps_blob.Get()->GetBufferPointer(), ps_blob.Get()->GetBufferSize(), nullptr, &ps);
 	device->CreateComputeShader(cull_blob.Get()->GetBufferPointer(), cull_blob.Get()->GetBufferSize(), nullptr, &cull_shader);
 	device->CreateVertexShader(nocull_blob.Get()->GetBufferPointer(), nocull_blob.Get()->GetBufferSize(), nullptr, &nocull_vs);
+	device->CreateComputeShader(occluder_blob.Get()->GetBufferPointer(), occluder_blob.Get()->GetBufferSize(), nullptr, &occluder_shader);
 
 	std::vector<ComPtr<ID3D11ComputeShader>> shaders(shader_data.size());
 	for (unsigned int i = 0; i < shader_data.size(); i++) {
@@ -484,79 +497,177 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 	//
 
 	if (occlusion) {
-		MSG msg = {};
-		while (running) {
-			while (PeekMessageW(&msg, 0, 0, 0, PM_REMOVE)) {
-				TranslateMessage(&msg);
-				DispatchMessageW(&msg);
-			}
+		if (occluder_occludee) {
+			MSG msg = {};
+			while (running) {
+				while (PeekMessageW(&msg, 0, 0, 0, PM_REMOVE)) {
+					TranslateMessage(&msg);
+					DispatchMessageW(&msg);
+				}
 
-			ctx->RSSetViewports(1, &viewport);
-			ctx->RSSetState(rs.Get());
-			ctx->VSSetShader(vs.Get(), nullptr, 0);
-			ctx->VSSetShaderResources(0, render_SRVs.size(), render_SRVs.data());
-			ctx->PSSetShader(ps.Get(), nullptr, 0);
-			ctx->PSSetShaderResources(0, 0, nullptr);
-			ctx->ClearRenderTargetView(RTV.Get(), clear_color);
-			ctx->ClearDepthStencilView(DSV.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
-			ctx->OMSetRenderTargets(1, RTV.GetAddressOf(), DSV.Get());
-			ctx->OMSetDepthStencilState(dss.Get(), 0);
-			ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-			ctx->DrawInstancedIndirect(indirect_buf.Get(), 0);
+				ctx->RSSetViewports(1, &viewport);
+				ctx->RSSetState(rs.Get());
+				ctx->VSSetShader(vs.Get(), nullptr, 0);
+				ctx->VSSetShaderResources(0, render_SRVs.size(), render_SRVs.data());
+				ctx->PSSetShader(ps.Get(), nullptr, 0);
+				ctx->PSSetShaderResources(0, 0, nullptr);
+				ctx->ClearRenderTargetView(RTV.Get(), clear_color);
+				ctx->ClearDepthStencilView(DSV.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
+				ctx->OMSetRenderTargets(1, RTV.GetAddressOf(), DSV.Get());
+				ctx->OMSetDepthStencilState(dss.Get(), 0);
+				ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+				ctx->DrawInstancedIndirect(indirect_buf.Get(), 0);
 
-			ctx->OMSetRenderTargets(0, nullptr, nullptr); // unbind DSV first
-
-			ctx->CopySubresourceRegion(
-				HIZ_buffer_texture.Get(),  // dst
-				0,              // dst subresource (mip 0)
-				0, 0, 0,        // dst x y z
-				DSV_tex.Get(),  // src
-				0,              // src subresource
-				nullptr         // src box (nullptr = whole texture)
-			);
-
-			for (unsigned int i = 0; i < num_mips - 1; i++) {
-				ctx->CSSetShaderResources(0, 1, nullSRVs);
+				ctx->CSSetShader(occluder_shader.Get(), nullptr, 0);
+				ctx->CSSetShaderResources(0, 1, vertex_buffer_SRV.GetAddressOf());
+				ctx->CSSetUnorderedAccessViews(0, cull_UAVs.size(), cull_UAVs.data(), &zero);
+				ctx->Dispatch((num_triangles + 63) / 64, 1, 1);
+				ctx->CopyStructureCount(indirect_buf.Get(), 4, status_buffer_UAV.Get());
 				ctx->CSSetUnorderedAccessViews(0, 1, nullUAVs, nullptr);
-				ctx->CSSetShader(shaders[i].Get(), nullptr, 0);
-				ctx->CSSetShaderResources(0, 1, HIZ_buffer_texture_SRVs[i].GetAddressOf());
-				ctx->CSSetUnorderedAccessViews(0, 1, HIZ_buffer_texture_UAVs_B[i + 1].GetAddressOf(), nullptr);
-				ctx->Dispatch(shader_data[i].dispatchx, shader_data[i].dispatchy, 1);
+				ctx->CSSetShaderResources(0, 2, nullSRVs);
+
+				ctx->RSSetViewports(1, &viewport);
+				ctx->RSSetState(rs.Get());
+				ctx->VSSetShader(vs.Get(), nullptr, 0);
+				ctx->VSSetShaderResources(0, render_SRVs.size(), render_SRVs.data());
+				ctx->PSSetShader(ps.Get(), nullptr, 0);
+				ctx->PSSetShaderResources(0, 0, nullptr);
+				ctx->ClearDepthStencilView(DSV.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
+				ctx->OMSetRenderTargets(0, nullptr, DSV.Get());
+				ctx->OMSetDepthStencilState(dss.Get(), 0);
+				ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+				ctx->DrawInstancedIndirect(indirect_buf.Get(), 0);
+
+				ctx->OMSetRenderTargets(0, nullptr, nullptr); // unbind DSV first
 
 				ctx->CopySubresourceRegion(
 					HIZ_buffer_texture.Get(),  // dst
-					i + 1,              // dst subresource (mip 1)
+					0,              // dst subresource (mip 0)
 					0, 0, 0,        // dst x y z
-					HIZ_buffer_texture_B.Get(),  // src
-					i + 1,              // src subresource
+					DSV_tex.Get(),  // src
+					0,              // src subresource
 					nullptr         // src box (nullptr = whole texture)
 				);
+
+				for (unsigned int i = 0; i < num_mips - 1; i++) {
+					ctx->CSSetShaderResources(0, 1, nullSRVs);
+					ctx->CSSetUnorderedAccessViews(0, 1, nullUAVs, nullptr);
+					ctx->CSSetShader(shaders[i].Get(), nullptr, 0);
+					ctx->CSSetShaderResources(0, 1, HIZ_buffer_texture_SRVs[i].GetAddressOf());
+					ctx->CSSetUnorderedAccessViews(0, 1, HIZ_buffer_texture_UAVs_B[i + 1].GetAddressOf(), nullptr);
+					ctx->Dispatch(shader_data[i].dispatchx, shader_data[i].dispatchy, 1);
+
+					ctx->CopySubresourceRegion(
+						HIZ_buffer_texture.Get(),  // dst
+						i + 1,              // dst subresource (mip 1)
+						0, 0, 0,        // dst x y z
+						HIZ_buffer_texture_B.Get(),  // src
+						i + 1,              // src subresource
+						nullptr         // src box (nullptr = whole texture)
+					);
+				}
+
+				ctx->OMSetRenderTargets(0, nullptr, nullptr);
+				ID3D11ShaderResourceView* nulls[] = { nullptr, nullptr };
+				ctx->VSSetShaderResources(0, 2, nulls); // unbind before cull pass
+
+				ctx->CSSetShader(cull_shader.Get(), nullptr, 0);
+				ctx->CSSetShaderResources(0, cull_SRVs.size(), cull_SRVs.data());
+				ctx->CSSetUnorderedAccessViews(0, cull_UAVs.size(), cull_UAVs.data(), &zero);
+				ctx->CSSetConstantBuffers(0, 1, dimensions_buffer.GetAddressOf());
+				ctx->Dispatch((num_triangles + 63) / 64, 1, 1);
+				ctx->CopyStructureCount(indirect_buf.Get(), 4, status_buffer_UAV.Get());
+				ctx->CSSetUnorderedAccessViews(0, 1, nullUAVs, nullptr);
+				ctx->CSSetShaderResources(0, 2, nullSRVs); // also unbind CS SRVs
+
+				frame_counter++;
+
+				swapchain->Present(0, DXGI_PRESENT_ALLOW_TEARING);
+
+				auto later = std::chrono::high_resolution_clock::now();
+
+				if (std::chrono::duration<double, std::milli>(later - now).count() >= 1000.0f) {
+					SetWindowTextA(window, std::to_string(frame_counter).c_str());
+
+					now = later;
+					frame_counter = 0;
+				}
 			}
+		} else {
+			MSG msg = {};
+			while (running) {
+				while (PeekMessageW(&msg, 0, 0, 0, PM_REMOVE)) {
+					TranslateMessage(&msg);
+					DispatchMessageW(&msg);
+				}
 
-			ctx->OMSetRenderTargets(0, nullptr, nullptr);
-			ID3D11ShaderResourceView* nulls[] = { nullptr, nullptr };
-			ctx->VSSetShaderResources(0, 2, nulls); // unbind before cull pass
+				ctx->RSSetViewports(1, &viewport);
+				ctx->RSSetState(rs.Get());
+				ctx->VSSetShader(vs.Get(), nullptr, 0);
+				ctx->VSSetShaderResources(0, render_SRVs.size(), render_SRVs.data());
+				ctx->PSSetShader(ps.Get(), nullptr, 0);
+				ctx->PSSetShaderResources(0, 0, nullptr);
+				ctx->ClearRenderTargetView(RTV.Get(), clear_color);
+				ctx->ClearDepthStencilView(DSV.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
+				ctx->OMSetRenderTargets(1, RTV.GetAddressOf(), DSV.Get());
+				ctx->OMSetDepthStencilState(dss.Get(), 0);
+				ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+				ctx->DrawInstancedIndirect(indirect_buf.Get(), 0);
 
-			ctx->CSSetShader(cull_shader.Get(), nullptr, 0);
-			ctx->CSSetShaderResources(0, cull_SRVs.size(), cull_SRVs.data());
-			ctx->CSSetUnorderedAccessViews(0, cull_UAVs.size(), cull_UAVs.data(), &zero);
-			ctx->CSSetConstantBuffers(0, 1, dimensions_buffer.GetAddressOf());
-			ctx->Dispatch((num_triangles + 63) / 64, 1, 1);
-			ctx->CopyStructureCount(indirect_buf.Get(), 4, status_buffer_UAV.Get());
-			ctx->CSSetUnorderedAccessViews(0, 1, nullUAVs, nullptr);
-			ctx->CSSetShaderResources(0, 2, nullSRVs); // also unbind CS SRVs
+				ctx->OMSetRenderTargets(0, nullptr, nullptr); // unbind DSV first
 
-			frame_counter++;
+				ctx->CopySubresourceRegion(
+					HIZ_buffer_texture.Get(),  // dst
+					0,              // dst subresource (mip 0)
+					0, 0, 0,        // dst x y z
+					DSV_tex.Get(),  // src
+					0,              // src subresource
+					nullptr         // src box (nullptr = whole texture)
+				);
 
-			swapchain->Present(0, DXGI_PRESENT_ALLOW_TEARING);
+				for (unsigned int i = 0; i < num_mips - 1; i++) {
+					ctx->CSSetShaderResources(0, 1, nullSRVs);
+					ctx->CSSetUnorderedAccessViews(0, 1, nullUAVs, nullptr);
+					ctx->CSSetShader(shaders[i].Get(), nullptr, 0);
+					ctx->CSSetShaderResources(0, 1, HIZ_buffer_texture_SRVs[i].GetAddressOf());
+					ctx->CSSetUnorderedAccessViews(0, 1, HIZ_buffer_texture_UAVs_B[i + 1].GetAddressOf(), nullptr);
+					ctx->Dispatch(shader_data[i].dispatchx, shader_data[i].dispatchy, 1);
 
-			auto later = std::chrono::high_resolution_clock::now();
+					ctx->CopySubresourceRegion(
+						HIZ_buffer_texture.Get(),  // dst
+						i + 1,              // dst subresource (mip 1)
+						0, 0, 0,        // dst x y z
+						HIZ_buffer_texture_B.Get(),  // src
+						i + 1,              // src subresource
+						nullptr         // src box (nullptr = whole texture)
+					);
+				}
 
-			if (std::chrono::duration<double, std::milli>(later - now).count() >= 1000.0f) {
-				SetWindowTextA(window, std::to_string(frame_counter).c_str());
+				ctx->OMSetRenderTargets(0, nullptr, nullptr);
+				ID3D11ShaderResourceView* nulls[] = { nullptr, nullptr };
+				ctx->VSSetShaderResources(0, 2, nulls); // unbind before cull pass
 
-				now = later;
-				frame_counter = 0;
+				ctx->CSSetShader(cull_shader.Get(), nullptr, 0);
+				ctx->CSSetShaderResources(0, cull_SRVs.size(), cull_SRVs.data());
+				ctx->CSSetUnorderedAccessViews(0, cull_UAVs.size(), cull_UAVs.data(), &zero);
+				ctx->CSSetConstantBuffers(0, 1, dimensions_buffer.GetAddressOf());
+				ctx->Dispatch((num_triangles + 63) / 64, 1, 1);
+				ctx->CopyStructureCount(indirect_buf.Get(), 4, status_buffer_UAV.Get());
+				ctx->CSSetUnorderedAccessViews(0, 1, nullUAVs, nullptr);
+				ctx->CSSetShaderResources(0, 2, nullSRVs); // also unbind CS SRVs
+
+				frame_counter++;
+
+				swapchain->Present(0, DXGI_PRESENT_ALLOW_TEARING);
+
+				auto later = std::chrono::high_resolution_clock::now();
+
+				if (std::chrono::duration<double, std::milli>(later - now).count() >= 1000.0f) {
+					SetWindowTextA(window, std::to_string(frame_counter).c_str());
+
+					now = later;
+					frame_counter = 0;
+				}
 			}
 		}
 	} else {
