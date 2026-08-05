@@ -31,7 +31,7 @@ float isoperimetric_quotient(float perimiter, float area) {
 [numthreads(64, 1, 1)]
 void main(uint3 threadID : SV_DispatchThreadID, uint3 groupID : SV_GroupID, uint3 group_threadID : SV_GroupThreadID) {
     uint ID = threadID.x;
-  	uint triangleID_3 = ID * 9;
+	uint triangleID_3 = ID * 9;
 
     float3 xyz = float3(ndc_to_uv(unpack_uint_to_2float16(vertices[triangleID_3])), unpack_uint_to_2float16(vertices[triangleID_3 + 1]).x);
     float3 xyz2 = float3(ndc_to_uv(unpack_uint_to_2float16(vertices[triangleID_3 + 3])), unpack_uint_to_2float16(vertices[triangleID_3 + 4]).x);
@@ -51,7 +51,7 @@ void main(uint3 threadID : SV_DispatchThreadID, uint3 groupID : SV_GroupID, uint
     float score = area * isoperimetric_quotient(perimiter, area);
     
     //occluder_result.Append(ID);
-    if (score > 0.0000125) {
+    if (score > 0.0000175) {
         occluder_result.Append(ID);
     }
 }
