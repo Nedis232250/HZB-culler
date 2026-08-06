@@ -491,6 +491,7 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 
 	auto now = std::chrono::high_resolution_clock::now();
 	unsigned long long frame_counter = 0;
+	unsigned int thradgroupx_64_dispatch = (num_triangles + 63) / 64;
 
 	//
 	// render loop and message loop
@@ -504,38 +505,20 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 					TranslateMessage(&msg);
 					DispatchMessageW(&msg);
 				}
-
-				ctx->RSSetViewports(1, &viewport);
-				ctx->RSSetState(rs.Get());
-				ctx->VSSetShader(vs.Get(), nullptr, 0);
-				ctx->VSSetShaderResources(0, render_SRVs.size(), render_SRVs.data());
-				ctx->PSSetShader(ps.Get(), nullptr, 0);
-				ctx->PSSetShaderResources(0, 0, nullptr);
-				ctx->ClearRenderTargetView(RTV.Get(), clear_color);
-				ctx->ClearDepthStencilView(DSV.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
-				ctx->OMSetRenderTargets(1, RTV.GetAddressOf(), DSV.Get());
-				ctx->OMSetDepthStencilState(dss.Get(), 0);
-				ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-				ctx->DrawInstancedIndirect(indirect_buf.Get(), 0);
-
+				
 				ctx->CSSetShader(occluder_shader.Get(), nullptr, 0);
 				ctx->CSSetShaderResources(0, 1, vertex_buffer_SRV.GetAddressOf());
 				ctx->CSSetUnorderedAccessViews(0, cull_UAVs.size(), cull_UAVs.data(), &zero);
-				ctx->Dispatch((num_triangles + 63) / 64, 1, 1);
+				ctx->Dispatch(thradgroupx_64_dispatch, 1, 1);
 				ctx->CopyStructureCount(indirect_buf.Get(), 4, status_buffer_UAV.Get());
 				ctx->CSSetUnorderedAccessViews(0, 1, nullUAVs, nullptr);
 				ctx->CSSetShaderResources(0, 2, nullSRVs);
 
-				ctx->RSSetViewports(1, &viewport);
-				ctx->RSSetState(rs.Get());
 				ctx->VSSetShader(vs.Get(), nullptr, 0);
 				ctx->VSSetShaderResources(0, render_SRVs.size(), render_SRVs.data());
 				ctx->PSSetShader(ps.Get(), nullptr, 0);
-				ctx->PSSetShaderResources(0, 0, nullptr);
 				ctx->ClearDepthStencilView(DSV.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
 				ctx->OMSetRenderTargets(0, nullptr, DSV.Get());
-				ctx->OMSetDepthStencilState(dss.Get(), 0);
-				ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 				ctx->DrawInstancedIndirect(indirect_buf.Get(), 0);
 
 				ctx->OMSetRenderTargets(0, nullptr, nullptr); // unbind DSV first
@@ -550,8 +533,6 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 				);
 
 				for (unsigned int i = 0; i < num_mips - 1; i++) {
-					ctx->CSSetShaderResources(0, 1, nullSRVs);
-					ctx->CSSetUnorderedAccessViews(0, 1, nullUAVs, nullptr);
 					ctx->CSSetShader(shaders[i].Get(), nullptr, 0);
 					ctx->CSSetShaderResources(0, 1, HIZ_buffer_texture_SRVs[i].GetAddressOf());
 					ctx->CSSetUnorderedAccessViews(0, 1, HIZ_buffer_texture_UAVs_B[i + 1].GetAddressOf(), nullptr);
@@ -567,7 +548,6 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 					);
 				}
 
-				ctx->OMSetRenderTargets(0, nullptr, nullptr);
 				ID3D11ShaderResourceView* nulls[] = { nullptr, nullptr };
 				ctx->VSSetShaderResources(0, 2, nulls); // unbind before cull pass
 
@@ -575,10 +555,21 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 				ctx->CSSetShaderResources(0, cull_SRVs.size(), cull_SRVs.data());
 				ctx->CSSetUnorderedAccessViews(0, cull_UAVs.size(), cull_UAVs.data(), &zero);
 				ctx->CSSetConstantBuffers(0, 1, dimensions_buffer.GetAddressOf());
-				ctx->Dispatch((num_triangles + 63) / 64, 1, 1);
+				ctx->Dispatch(thradgroupx_64_dispatch, 1, 1);
 				ctx->CopyStructureCount(indirect_buf.Get(), 4, status_buffer_UAV.Get());
 				ctx->CSSetUnorderedAccessViews(0, 1, nullUAVs, nullptr);
 				ctx->CSSetShaderResources(0, 2, nullSRVs); // also unbind CS SRVs
+
+				ctx->RSSetViewports(1, &viewport);
+				ctx->RSSetState(rs.Get());
+				ctx->VSSetShader(vs.Get(), nullptr, 0);
+				ctx->VSSetShaderResources(0, render_SRVs.size(), render_SRVs.data());
+				ctx->PSSetShader(ps.Get(), nullptr, 0);
+				ctx->ClearRenderTargetView(RTV.Get(), clear_color);
+				ctx->ClearDepthStencilView(DSV.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
+				ctx->OMSetRenderTargets(1, RTV.GetAddressOf(), DSV.Get());
+				ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+				ctx->DrawInstancedIndirect(indirect_buf.Get(), 0);
 
 				frame_counter++;
 
