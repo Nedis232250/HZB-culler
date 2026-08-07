@@ -25,9 +25,9 @@ Tests and results (what actually happened on what?):
 - Code for the vertex generation is down below (its a random AI generated test in "AI generated random GPU killer.py" meant to represent the worst case scenarios)
 
 On my Intel iGPU on my new computer (2026 HP Omen max 16, on the iGPU of an Intel core ultra 7 255hx, the Intel arc 64eu graphics),
-I got 30 fps without occlusion culling, and 60 fps with it, and when I switched the display to discrete
+I got 30 fps without occlusion culling, and 50 fps with it, and when I switched the display to discrete
 (via NVIDIA advanced optimus), and used my RTX 5070 ti laptop GPU (140w power limit, with the adequate OMEN tempest pro cooling
-meaning the GPU stayed very cool even under max load), the FPS jumped from a high 320 to an unbeliveable 925.
+meaning the GPU stayed very cool even under max load), the FPS jumped from a high 320 to an unbeliveable 634.
 
 Boilerplate (the boring stuff that sets everything up, all in main.cpp):
 In my code I use 2 technologies deepy integrated into Windows 7, 8, 8.1, 10 and 11: the Windows API and DirectX 11. The boilerplate
@@ -145,9 +145,8 @@ The rendering and the problem:
 
 When we draw out 5 million triangles, the result looks fine but in reality the GPU is stuck drawing all 5 million of them. This takes a long
 time. To optimize we implement something called "occlusion culling" or we cull the triangles that are obscured by other triangles in the scene.
-To do this we have to take the previous frame's depth data and use it to make an informed guess on what geometry in the next frame should be drawn.
-Think of it as money in the bank with interest, the amount of money you own is not much different from now to next second. Same on the GPU: we can 
-use the previous frame's data because the next frame is barely different in nature than the previous one. Using that, we use something called a
+To do this we have to brute force render large triangles that take up a large amount of screen and are likely to occlude other objects and use their placement to make an informed guess on what geometry in the next frame should be drawn.
+Using that data, we use something called a
 downsampling algorithm, a set of general purpose "shaders" (compue shaders, programs on the GPU) to take our high resolution frame, copy it many times
 and then make several of those copies lower resolution. This makes it easier to cull, as for large triangles you don't need to compare their depth
 against a high resolution depth buffer, but only against a few pixels on a low resolution depth buffer. Then with those comparisons, you can make an
