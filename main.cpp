@@ -30,7 +30,7 @@ constexpr static unsigned int zero = 0;
 constexpr static bool debug = false;
 constexpr static bool console = false;
 constexpr static bool occlusion = true;
-constexpr static bool generate_shaders = true;
+constexpr static bool generate_shaders = false;
 constexpr static bool occluder_occludee = true;
 constexpr static ID3D11UnorderedAccessView* nullUAVs[] = { nullptr };
 constexpr static ID3D11ShaderResourceView* nullSRVs[] = { nullptr, nullptr };
@@ -79,7 +79,7 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 	}
 
 	std::vector<downscale_return_structure> shader_data = downscale_parser("downscaleshadercache.txt");
-	
+
 	WNDCLASS w_class = {};
 	w_class.lpszClassName = lp_class_name;
 	w_class.hInstance = h_instance;
@@ -97,7 +97,7 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 
 	std::vector<float> vertices = load_vertices("hello.world", num_triangles);
 	std::vector<unsigned int> compressed_vertices = compress_vertices(vertices);
-	
+
 	if (debug && console) {
 		for (const auto& vertex : compressed_vertices) {
 			std::cout << vertex << "\n";
@@ -186,7 +186,7 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 	//
 	// Create vertex buffer and SRV
 	//
-	
+
 	ComPtr<ID3D11Buffer> vertex_buffer;
 	D3D11_BUFFER_DESC vertex_buffer_desc = {};
 	vertex_buffer_desc.ByteWidth = sizeof(float) * compressed_vertices.size();
@@ -198,9 +198,9 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 
 	D3D11_SUBRESOURCE_DATA vertex_buffer_data = {};
 	vertex_buffer_data.pSysMem = compressed_vertices.data();
-	
+
 	device->CreateBuffer(&vertex_buffer_desc, &vertex_buffer_data, &vertex_buffer);
-	
+
 	ComPtr<ID3D11ShaderResourceView> vertex_buffer_SRV;
 	D3D11_SHADER_RESOURCE_VIEW_DESC vertex_buffer_SRV_desc = {};
 	vertex_buffer_SRV_desc.Format = DXGI_FORMAT_UNKNOWN;
@@ -262,7 +262,7 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 		ctx->ClearUnorderedAccessViewFloat(HIZ_buffer_texture_UAVs[i].Get(), clear_val);
 		ctx->ClearUnorderedAccessViewFloat(HIZ_buffer_texture_UAVs_B[i].Get(), clear_val);
 	}
-	
+
 	ComPtr<ID3D11ShaderResourceView> HIZ_full_SRV;
 	D3D11_SHADER_RESOURCE_VIEW_DESC full_srv_desc = {};
 	full_srv_desc.Format = DXGI_FORMAT_R32_FLOAT;
@@ -300,7 +300,7 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 	status_buffer_desc.Usage = D3D11_USAGE_DEFAULT;
 
 	device->CreateBuffer(&status_buffer_desc, nullptr, &status_buffer);
-	
+
 	ComPtr<ID3D11UnorderedAccessView> status_buffer_UAV;
 	D3D11_UNORDERED_ACCESS_VIEW_DESC status_buffer_UAV_desc = {};
 	status_buffer_UAV_desc.Buffer.FirstElement = 0;
@@ -345,7 +345,7 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 	counter_desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
 	counter_desc.StructureByteStride = sizeof(unsigned int);
 	counter_desc.Usage = D3D11_USAGE_DEFAULT;
-	
+
 	device->CreateBuffer(&counter_desc, nullptr, &counter);
 
 	ComPtr<ID3D11UnorderedAccessView> counter_UAV;
@@ -497,6 +497,10 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 	// render loop and message loop
 	//
 
+	ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	ctx->RSSetViewports(1, &viewport);
+	ctx->RSSetState(rs.Get());
+
 	if (occlusion) {
 		if (occluder_occludee) {
 			MSG msg = {};
@@ -505,7 +509,7 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 					TranslateMessage(&msg);
 					DispatchMessageW(&msg);
 				}
-				
+
 				ctx->CSSetShader(occluder_shader.Get(), nullptr, 0);
 				ctx->CSSetShaderResources(0, 1, vertex_buffer_SRV.GetAddressOf());
 				ctx->CSSetUnorderedAccessViews(0, cull_UAVs.size(), cull_UAVs.data(), &zero);
@@ -517,8 +521,9 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 				ctx->VSSetShader(vs.Get(), nullptr, 0);
 				ctx->VSSetShaderResources(0, render_SRVs.size(), render_SRVs.data());
 				ctx->PSSetShader(ps.Get(), nullptr, 0);
+				ctx->ClearRenderTargetView(RTV.Get(), clear_color);
 				ctx->ClearDepthStencilView(DSV.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
-				ctx->OMSetRenderTargets(0, nullptr, DSV.Get());
+				ctx->OMSetRenderTargets(1, RTV.GetAddressOf(), DSV.Get());
 				ctx->DrawInstancedIndirect(indirect_buf.Get(), 0);
 
 				ctx->OMSetRenderTargets(0, nullptr, nullptr); // unbind DSV first
@@ -548,8 +553,7 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 					);
 				}
 
-				ID3D11ShaderResourceView* nulls[] = { nullptr, nullptr };
-				ctx->VSSetShaderResources(0, 2, nulls); // unbind before cull pass
+				ctx->VSSetShaderResources(0, 2, nullSRVs); // unbind before cull pass
 
 				ctx->CSSetShader(cull_shader.Get(), nullptr, 0);
 				ctx->CSSetShaderResources(0, cull_SRVs.size(), cull_SRVs.data());
@@ -559,16 +563,11 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 				ctx->CopyStructureCount(indirect_buf.Get(), 4, status_buffer_UAV.Get());
 				ctx->CSSetUnorderedAccessViews(0, 1, nullUAVs, nullptr);
 				ctx->CSSetShaderResources(0, 2, nullSRVs); // also unbind CS SRVs
-
-				ctx->RSSetViewports(1, &viewport);
-				ctx->RSSetState(rs.Get());
+				
 				ctx->VSSetShader(vs.Get(), nullptr, 0);
 				ctx->VSSetShaderResources(0, render_SRVs.size(), render_SRVs.data());
 				ctx->PSSetShader(ps.Get(), nullptr, 0);
-				ctx->ClearRenderTargetView(RTV.Get(), clear_color);
-				ctx->ClearDepthStencilView(DSV.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
 				ctx->OMSetRenderTargets(1, RTV.GetAddressOf(), DSV.Get());
-				ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 				ctx->DrawInstancedIndirect(indirect_buf.Get(), 0);
 
 				frame_counter++;
@@ -584,7 +583,8 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 					frame_counter = 0;
 				}
 			}
-		} else {
+		}
+		else {
 			MSG msg = {};
 			while (running) {
 				while (PeekMessageW(&msg, 0, 0, 0, PM_REMOVE)) {
@@ -661,7 +661,8 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 				}
 			}
 		}
-	} else {
+	}
+	else {
 		MSG msg = {};
 		while (running) {
 			while (PeekMessageW(&msg, 0, 0, 0, PM_REMOVE)) {
