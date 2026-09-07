@@ -1,12 +1,14 @@
 #pragma once
-#include <string>
 #include <iostream>
 #include <vector>
 #include <consoleapi.h>
 #include <fstream>
+#include <string>
+#include <cmath>
+#include <DirectXMath.h>
 
 struct downscale_return_structure {
-    std::string shader;
+    std::string shader_string;
     unsigned int dispatchx;
     unsigned int dispatchy;
 };
