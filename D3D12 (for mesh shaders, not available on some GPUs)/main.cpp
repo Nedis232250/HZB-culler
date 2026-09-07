@@ -19,7 +19,7 @@ static bool running = true;
 static HWND window;
 static unsigned int width = 1920;
 static unsigned int height = 1080;
-unsigned long long num_triangles = 1;
+unsigned long long num_triangles = 5000050;
 unsigned int num_mips = (unsigned int)floor(log2((float)min(width, height))) + 1u;
 std::vector<unsigned int> dimensions = { width, height, (unsigned int)ceil(sqrt(num_triangles) / 8) };
 constexpr static unsigned int minus_one = -1;
@@ -32,7 +32,7 @@ HRESULT hr;
 //
 
 constexpr static bool debug = false;
-constexpr static bool console = true;
+constexpr static bool console = false;
 constexpr static bool occlusion = false;
 constexpr static bool generate_shaders = false;
 constexpr static bool occluder_occludee = false;
@@ -140,8 +140,13 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 	ComPtr<ID3D12DescriptorHeap> vertex_buffer_descriptor_heap = create_CBV_SRV_UAV_descriptor_heap(device.Get(), 1);
 	D3D12_CPU_DESCRIPTOR_HANDLE vertex_buffer_CPU_descriptor_handle = vertex_buffer_descriptor_heap.Get()->GetCPUDescriptorHandleForHeapStart();
 
-	ComPtr<ID3D12Resource> vertex_buffer = create_StructuredBuffer_for_upload_and_SRV(device.Get(), compressed_vertices.size(), sizeof(compressed_vertices[0]), compressed_vertices.data(), vertex_buffer_CPU_descriptor_handle);
 	
+	ComPtr<ID3D12DescriptorHeap> occluder_descriptor_heap = create_CBV_SRV_UAV_descriptor_heap(device.Get(), 2);
+	D3D12_CPU_DESCRIPTOR_HANDLE occlucder_CPU_descriptor_handle = occluder_descriptor_heap.Get()->GetCPUDescriptorHandleForHeapStart();
+	
+	ComPtr<ID3D12Resource> vertex_buffer = create_StructuredBuffer_for_upload_and_SRV(device.Get(), compressed_vertices.size(), sizeof(compressed_vertices[0]), compressed_vertices.data(), false, vertex_buffer_CPU_descriptor_handle);
+	create_SRV_with_premade_buffer(device.Get(), vertex_buffer.Get(), occlucder_CPU_descriptor_handle, false, true, compressed_vertices.size(), sizeof(compressed_vertices[0]), DXGI_FORMAT_UNKNOWN);
+
 	//
 	// Compile Shaders
 	//
@@ -343,7 +348,7 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 		cmd_list->SetGraphicsRootDescriptorTable(0, vertex_buffer_descriptor_heap.Get()->GetGPUDescriptorHandleForHeapStart());
 		cmd_list->SetPipelineState(PSO.Get());
 		cmd_list->OMSetRenderTargets(1, &back_buffers_descriptor_handle_for_references[current_back_buffer], false, &DSV_CPU_handle);
-		cmd_list->DrawInstanced(3, 1, 0, 0);
+		cmd_list->DrawInstanced(3 * num_triangles, 1, 0, 0);
 		RTV_present_barrier2.Transition.pResource = back_buffers[current_back_buffer].Get();
 		cmd_list->ResourceBarrier(1, &RTV_present_barrier2);
 		cmd_list->Close();
