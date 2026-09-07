@@ -3,9 +3,12 @@
 #include <vector>
 #include <consoleapi.h>
 #include <fstream>
+#include <string>
+#include <cmath>
+#include <DirectXMath.h>
 
 struct downscale_return_structure {
-    std::string shader;
+    std::string shader_string;
     unsigned int dispatchx;
     unsigned int dispatchy;
 };
@@ -118,16 +121,16 @@ std::vector<downscale_return_structure> downscale_parser(std::string file) {
 
         temp.push_back(shader_lines[i]);
     }
-    
+
     // Split shader data into the shader code and dispatch info
 
     std::vector<downscale_return_structure> downscale_shader_return;
 
     for (unsigned int i = 0; i < individual_shader_data.size(); i++) {
         std::string shader_code = "";
-        unsigned int dispatchx = 0; 
+        unsigned int dispatchx = 0;
         unsigned int dispatchy = 0;
-         
+
         for (unsigned int j = 0; j < individual_shader_data[i].size(); j++) {
             if (individual_shader_data[i][j] == "[DISPATCHINFO]") {
                 std::string target_info = individual_shader_data[i][j + 1];
