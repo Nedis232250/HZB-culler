@@ -97,7 +97,7 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 
 	std::vector<float> vertices = load_vertices("hello.world", num_triangles);
 	std::vector<unsigned int> compressed_vertices = compress_vertices(vertices);
-
+	
 	if (debug && console) {
 		for (const auto& vertex : compressed_vertices) {
 			std::cout << vertex << "\n";
@@ -435,7 +435,7 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 	std::vector<ComPtr<ID3D11ComputeShader>> shaders(shader_data.size());
 	for (unsigned int i = 0; i < shader_data.size(); i++) {
 		ComPtr<ID3DBlob> cs_blob_loop;
-		D3DCompile(shader_data[i].shader.c_str(), strlen(shader_data[i].shader.c_str()), nullptr, nullptr, nullptr, "main", "cs_5_0", compile_flags, 0, &cs_blob_loop, &error_blob);
+		D3DCompile(shader_data[i].shader_string.c_str(), strlen(shader_data[i].shader_string.c_str()), nullptr, nullptr, nullptr, "main", "cs_5_0", compile_flags, 0, &cs_blob_loop, &error_blob);
 		if (FAILED(hr)) {
 			if (error_blob.Get()->GetBufferSize() > 0) {
 				OutputDebugStringA((const char*)error_blob.Get()->GetBufferPointer());
