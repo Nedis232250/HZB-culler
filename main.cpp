@@ -17,9 +17,9 @@ static bool running = true;
 static HWND window;
 static unsigned int width = 1920;
 static unsigned int height = 1080;
-unsigned long long num_triangles = 40000000;
+unsigned long long num_triangles = 400;
 unsigned int num_mips = (unsigned int)floor(log2((float)min(width, height))) + 1u;
-std::vector<unsigned int> dimensions = { width, height, (unsigned int)ceil(sqrt(num_triangles) / 8) };
+std::vector<unsigned int> dimensions = { width, height, (unsigned int)ceil(sqrt(num_triangles) / 8), (unsigned int)num_triangles };
 constexpr static unsigned int minus_one = -1;
 constexpr static unsigned int zero = 0;
 
@@ -136,7 +136,7 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 	sc_desc.OutputWindow = window;
 	sc_desc.SampleDesc.Count = 1;
 	sc_desc.Windowed = TRUE;
-	sc_desc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+	sc_desc.Flags = 0;
 	sc_desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 
 	factory->CreateSwapChain(device.Get(), &sc_desc, &swapchain);
@@ -554,8 +554,6 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 				}
 				ctx->VSSetShaderResources(0, 2, nullSRVs);
 
-				//ctx->VSSetShaderResources(0, 2, nullSRVs); // unbind before cull pass
-
 				ctx->CSSetShader(cull_shader.Get(), nullptr, 0);
 				ctx->CSSetShaderResources(0, cull_SRVs.size(), cull_SRVs.data());
 				ctx->CSSetUnorderedAccessViews(0, cull_UAVs.size(), cull_UAVs.data(), &zero);
@@ -575,7 +573,7 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 
 				frame_counter++;
 
-				swapchain->Present(0, DXGI_PRESENT_ALLOW_TEARING);
+				swapchain->Present(1, 0);
 
 				auto later = std::chrono::high_resolution_clock::now();
 
@@ -652,7 +650,7 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 
 				frame_counter++;
 
-				swapchain->Present(0, DXGI_PRESENT_ALLOW_TEARING);
+				swapchain->Present(1, 0);
 
 				auto later = std::chrono::high_resolution_clock::now();
 
@@ -686,7 +684,7 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 			ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 			ctx->Draw(num_triangles * 3, 0);
 
-			swapchain->Present(0, DXGI_PRESENT_ALLOW_TEARING);
+			swapchain->Present(1, 0);
 
 			frame_counter++;
 
