@@ -17,7 +17,7 @@ static bool running = true;
 static HWND window;
 static unsigned int width = 1920;
 static unsigned int height = 1080;
-unsigned long long num_triangles = 5000050;
+unsigned long long num_triangles = 40000000;
 unsigned int num_mips = (unsigned int)floor(log2((float)min(width, height))) + 1u;
 std::vector<unsigned int> dimensions = { width, height, (unsigned int)ceil(sqrt(num_triangles) / 8) };
 constexpr static unsigned int minus_one = -1;
@@ -552,8 +552,9 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 						nullptr         // src box (nullptr = whole texture)
 					);
 				}
+				ctx->VSSetShaderResources(0, 2, nullSRVs);
 
-				ctx->VSSetShaderResources(0, 2, nullSRVs); // unbind before cull pass
+				//ctx->VSSetShaderResources(0, 2, nullSRVs); // unbind before cull pass
 
 				ctx->CSSetShader(cull_shader.Get(), nullptr, 0);
 				ctx->CSSetShaderResources(0, cull_SRVs.size(), cull_SRVs.data());
@@ -569,6 +570,8 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 				ctx->PSSetShader(ps.Get(), nullptr, 0);
 				ctx->OMSetRenderTargets(1, RTV.GetAddressOf(), DSV.Get());
 				ctx->DrawInstancedIndirect(indirect_buf.Get(), 0);
+
+				ctx->VSSetShaderResources(0, 2, nullSRVs);
 
 				frame_counter++;
 
