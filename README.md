@@ -9,7 +9,7 @@ Overview (why did I exactly create this?):
 
 When I was in 5th grade for christmas, my parents bought me a cheap dell inspiron (it inspired me, pun intended), 
 and I was at the time very happy that I could do web dev and basic python/JS scripting on something with an actual keyboard 
-with windows instead of an iPad on replit. But issues quickly started to rise for me, broken screens, hinges and bad FPS in
+with windows instead of an iPad on replit. But issues quickly started to rise for me, broken screens, a design flaw with the trackpad, broken hinges and bad FPS in
 Minecraft, my favorite game as a child. I got curious in 7th grade with C++ and eventually started to use it often because it
 was a challenge for me, and I would always see these "AAA game trailers" and "Raytracing Path tracing ultra HD plus pro max
 minecraft shaders" but all of these programs ran at an anemic 10-15 fps because of the Intel HD graphics inside that clamshell
