@@ -17,7 +17,7 @@ static bool running = true;
 static HWND window;
 static unsigned int width = 1920;
 static unsigned int height = 1080;
-unsigned long long num_triangles = 400;
+unsigned long long num_triangles = 200000;
 unsigned int num_mips = (unsigned int)floor(log2((float)min(width, height))) + 1u;
 std::vector<unsigned int> dimensions = { width, height, (unsigned int)ceil(sqrt(num_triangles) / 8), (unsigned int)num_triangles };
 constexpr static unsigned int minus_one = -1;
