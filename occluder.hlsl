@@ -28,7 +28,7 @@ float isoperimetric_quotient(float perimiter, float area) {
     return _12sqrt3 * area / perimiter;
 }
 
-[numthreads(64, 1, 1)]
+[numthreads(128, 1, 1)]
 void main(uint3 threadID : SV_DispatchThreadID, uint3 groupID : SV_GroupID, uint3 group_threadID : SV_GroupThreadID) {
     uint ID = threadID.x;
 	uint triangleID_3 = ID * 9;
