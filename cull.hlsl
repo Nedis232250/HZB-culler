@@ -18,7 +18,7 @@ float2 ndc_to_uv(float2 ndc) {
     return ndc * float2(0.5f, -0.5f) + 0.5f; // [-1,1] → [0,1]
 }
 
-[numthreads(64, 1, 1)]
+[numthreads(128, 1, 1)]
 void main(uint3 threadID : SV_DispatchThreadID, uint3 groupID : SV_GroupID, uint3 group_threadID : SV_GroupThreadID) {
     uint ID = threadID.x;
 	uint triangleID_3 = ID * 9;
