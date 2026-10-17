@@ -491,7 +491,7 @@ int WinMain(HINSTANCE h_instance, HINSTANCE p_instance, LPSTR lp_cmdln, int n_cm
 
 	auto now = std::chrono::high_resolution_clock::now();
 	unsigned long long frame_counter = 0;
-	unsigned int thradgroupx_64_dispatch = (num_triangles + 63) / 64;
+	unsigned int thradgroupx_64_dispatch = (num_triangles + 127) / 128;
 
 	//
 	// render loop and message loop
