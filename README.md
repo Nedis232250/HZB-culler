@@ -25,7 +25,7 @@ Tests and results (what actually happened on what?):
 - Code for the vertex generation is down below (its a random AI generated test in "AI generated random GPU killer.py" meant to represent the worst case scenarios)
 
 On my Intel iGPU on my new computer (2026 HP Omen max 16, on the iGPU of an Intel core ultra 7 255hx, the Intel arc 64eu graphics),
-I got 40 fps without occlusion culling, and 54 fps with it, and when I switched the display to discrete
+I got 40 fps without occlusion culling, and 60 fps with it, and when I switched the display to discrete
 (via NVIDIA advanced optimus), and used my RTX 5070 ti laptop GPU (140w power limit, with the adequate OMEN tempest pro cooling
 meaning the GPU stayed very cool even under max load), the FPS jumped from a high 320 to an unbeliveable 634 (needs to be retested after some bugfixes).
 
