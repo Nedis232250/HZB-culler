@@ -23,7 +23,6 @@ unsigned int flags0_factory_creation = 0;
 constexpr bool debug = true;
 constexpr bool console = true;
 constexpr bool occlusion = true;
-constexpr bool occluder_occludee = true;
 
 using namespace Microsoft::WRL;
 
