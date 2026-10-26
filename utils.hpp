@@ -97,16 +97,7 @@ std::vector<unsigned int> compress_vertices(std::vector<float> vertices) {
     return result;
 }
 
-std::vector<downscale_return_structure> downscale_parser(std::string file) {
-    std::string raw_output;
-    std::vector<std::string> shader_lines;
-    std::ifstream read_file(file);
-
-    // Get output text
-    while (std::getline(read_file, raw_output)) {
-        shader_lines.push_back(raw_output);
-    }
-
+std::vector<downscale_return_structure> downscale_parser(std::vector<std::string> shader_lines) {
     // split into individual shaders
 
     std::vector<std::vector<std::string>> individual_shader_data;
@@ -169,4 +160,56 @@ std::vector<downscale_return_structure> downscale_parser(std::string file) {
     }
 
     return downscale_shader_return;
+}
+
+std::vector<std::string> generate_downscale_shader_lines(unsigned int width, unsigned int height) {
+    std::vector<std::string> script_lines = {};
+
+    for (unsigned int x = 1; x < ceil(log2(min(width, height))); x++) {
+        std::vector<unsigned int> outputres = { unsigned int(floor(width / pow(2, x))), unsigned int(floor(height / pow(2, x))) };
+        unsigned int numthreadsx = 0;
+        unsigned int numthreadsy = 0;
+
+        if (outputres[0] % 32 == 0) {
+            numthreadsx = 32;
+        }
+        else {
+            for (unsigned int i = 1; i < 6; i++) {
+                if (unsigned int(unsigned int(outputres[0]) % unsigned int(pow(2, i))) != 0) {
+                    numthreadsx = unsigned int(pow(2, i - 1));
+                    break;
+                }
+            }
+        }
+
+        if (outputres[1] % 32 == 0) {
+            numthreadsy = 32;
+        }
+        else {
+            for (unsigned int i = 1; i < 6; i++) {
+                if (unsigned int(unsigned int(outputres[1]) % unsigned int(pow(2, i))) != 0) {
+                    numthreadsy = int(pow(2, i - 1));
+                    break;
+                }
+            }
+        }
+
+        script_lines.push_back("Texture2D<float> mip_src_tex : register(t0);");
+        script_lines.push_back("RWTexture2D<float> mip_dst_tex : register(u0);");
+        script_lines.push_back("[numthreads(" + std::to_string(numthreadsx) + ", " + std::to_string(numthreadsy) + ", 1)]");
+        script_lines.push_back("void main(uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID) {");
+        script_lines.push_back("int2 src_xy = int2(groupID.x * " + std::to_string(numthreadsx) + " + threadID.x, groupID.y * " + std::to_string(numthreadsy) + " + threadID.y);");
+        script_lines.push_back("int2 src_xy_scale = src_xy * 2;");
+        script_lines.push_back("float a = mip_src_tex[src_xy_scale + int2(0, 0)];");
+        script_lines.push_back("float b = mip_src_tex[src_xy_scale + int2(1, 0)];");
+        script_lines.push_back("float c = mip_src_tex[src_xy_scale + int2(0, 1)];");
+        script_lines.push_back("float d = mip_src_tex[src_xy_scale + int2(1, 1)];");
+        script_lines.push_back("mip_dst_tex[src_xy] = max(max(a, b), max(c, d));");
+        script_lines.push_back("}");
+        script_lines.push_back("[DISPATCHINFO]");
+        script_lines.push_back("[" + std::to_string(unsigned int(width / numthreadsx / pow(2, x))) + ", " + std::to_string(unsigned int(height / numthreadsy / pow(2, x))) + "]");
+        script_lines.push_back("[BREAKHERE]");
+    }
+
+    return script_lines;
 }
