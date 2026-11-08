@@ -1,4 +1,6 @@
 #pragma once
+#define NOMINMAX
+#include <windows.h>
 #include <iostream>
 #include <vector>
 #include <consoleapi.h>
@@ -6,6 +8,17 @@
 #include <string>
 #include <cmath>
 #include <DirectXMath.h>
+#include <algorithm>
+#include <cctype>
+#include <cstddef>
+#include <cstdlib>
+#include <limits>
+#include <thread>
+#include <cstring>
+#include <wrl/client.h>
+
+using high_resolution_clock = std::chrono::time_point<std::chrono::high_resolution_clock>;
+using namespace Microsoft::WRL;
 
 struct downscale_return_structure {
     std::string shader_string;
@@ -13,52 +26,153 @@ struct downscale_return_structure {
     unsigned int dispatchy;
 };
 
-template<typename T> struct make_2 {
-    T el1;
-    T el2;
+struct FPSReturn {
+    bool second;
+    unsigned long long frames_passed;
 };
 
 void attach_console() {
     if (AllocConsole()) {
         FILE* file;
         freopen_s(&file, "CONOUT$", "w", stdout);
+        freopen_s(&file, "CONIN$", "r", stdin);
     }
 }
 
-std::vector<float> load_vertices(const char* path, unsigned long long num_triangles) {
-    std::vector<float> result;
-    std::ifstream file(path);
+//
+// Pray to god this doesn't have any undefined behavior because I have zero idea how this works
+// 
+int find_cores() {
+    DWORD bytes = 0;
+
+    // 1. First call with a null pointer to let Windows tell us the exact size required
+    if (!GetLogicalProcessorInformation(nullptr, &bytes)) {
+        if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+            return -1; // An unexpected native error occurred
+        }
+    }
+
+    // 2. Mathematically calculate exactly how many elements to allocate
+    size_t required_elements = bytes / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION);
+    std::vector<SYSTEM_LOGICAL_PROCESSOR_INFORMATION> buffer(required_elements);
+
+    // 3. Second call with the perfectly sized buffer
+    if (!GetLogicalProcessorInformation(buffer.data(), &bytes)) {
+        return -1; // API failed unexpectedly
+    }
+
+    // 4. Count the physical cores securely within vector bounds
+    int physical_cores = 0;
+    size_t actual_elements = bytes / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION);
+
+    for (size_t i = 0; i < actual_elements; ++i) {
+        if (buffer.at(i).Relationship == RelationProcessorCore) {
+            physical_cores++;
+        }
+    }
+
+    return physical_cores;
+}
+
+//
+// Pray to god this doesn't have any undefined behavior because I have zero idea how this works
+// 
+// # Of dev hours wasted trying to find out what this function means: 1
+// Nedis232: 1 hour.
+//
+// (update this count)
+//
+std::vector<float> load_vertices(const char* path, unsigned long long num_triangles, unsigned int kThreads) {
+    if (kThreads == 0) {
+        kThreads = static_cast<unsigned int>(find_cores());
+        if (kThreads == 0) kThreads = 4;
+    }
+
+    constexpr size_t kFloatsPerVertex = 7;
+    constexpr size_t kNoFail = ~size_t(0);  // sentinel; avoids max() entirely
+
+    // 1. Slurp the file (std::string guarantees a trailing '\0' for strtof).
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
     if (!file.is_open()) {
         std::cout << "failed to open file\n";
         return {};
     }
+    const std::streamsize size = file.tellg();
+    file.seekg(0);
+    std::string buf(static_cast<size_t>(size), '\0');
+    file.read(buf.data(), size);
 
-    num_triangles *= (unsigned long long)3; // num triangles -> num vertices
-    float x, y, z, r, g, b, a;
-    char comma;
-    unsigned long long vertices_passed = (unsigned long long)0;
-    while ((file >> x >> comma >> y >> comma >> z >> comma >> r >> comma >> g >> comma >> b >> comma >> a) && (vertices_passed < num_triangles)) { // 1 vertex per
-        result.push_back(x);
-        result.push_back(y);
-        result.push_back(z);
-        result.push_back(r);
-        result.push_back(g);
-        result.push_back(b);
-        result.push_back(a);
-        file >> comma; // consume trailing comma if present, harmless if not
-        vertices_passed += (unsigned long long)1;
+    // 2. Index the first num_triangles*3 non-blank lines (one vertex per line).
+    const size_t max_vertices = static_cast<size_t>(num_triangles * 3ULL);
+    std::vector<size_t> line_starts;
+    for (size_t pos = 0; pos < buf.size() && line_starts.size() < max_vertices;) {
+        size_t eol = buf.find('\n', pos);
+        if (eol == std::string::npos) eol = buf.size();
+        size_t i = pos;
+        while (i < eol && std::isspace(static_cast<unsigned char>(buf.at(i)))) ++i;
+        if (i < eol) line_starts.push_back(pos);  // skip blank lines
+        pos = eol + 1;
     }
+
+    const size_t n = line_starts.size();
+    std::vector<float> result(n * kFloatsPerVertex);
+    std::vector<size_t> first_fail(kThreads, kNoFail);
+
+    // 3. Parse one line into 7 floats; returns false on malformed input.
+    auto parse_line = [&](size_t start, float* out) -> bool {
+        const char* p = buf.c_str() + start;
+        const char* eol = std::strchr(p, '\n');
+        if (!eol) eol = buf.c_str() + buf.size();
+        for (size_t k = 0; k < kFloatsPerVertex; ++k) {
+            char* end;
+            out[k] = std::strtof(p, &end);
+            if (end == p || end > eol) return false;
+            p = end;
+            if (k + 1 < kFloatsPerVertex) {
+                while (*p == ' ' || *p == '\t') ++p;
+                if (*p != ',') return false;
+                ++p;
+            }
+        }
+        return true;  // trailing comma (if any) is simply ignored
+        };
+
+    // 4. Each thread handles a contiguous block of lines.
+    const size_t chunk = (n + kThreads - 1) / kThreads;
+    std::vector<std::thread> threads;
+    for (unsigned t = 0; t < kThreads; ++t) {
+        const size_t begin = t * chunk;
+        const size_t end = (std::min)(n, begin + chunk);  // parenthesized: macro-safe
+        if (begin >= end) break;
+        threads.emplace_back([&, t, begin, end] {
+            for (size_t i = begin; i < end; ++i) {
+                if (!parse_line(line_starts.at(i), &result.at(i * kFloatsPerVertex))) {
+                    first_fail.at(t) = i;
+                    return;
+                }
+            }
+            });
+    }
+    for (auto& th : threads) th.join();
+
+    // 5. Match the original's behavior: stop at the first malformed vertex.
+    const size_t fail = *std::min_element(first_fail.begin(), first_fail.end());
+    if (fail != kNoFail)
+        result.resize(fail * kFloatsPerVertex);
 
     return result;
 }
 
+//
+// NOT BF16
+//
 uint32_t pack_float2_to_half2(float a, float b) {
     auto to_f16 = [](float f) -> uint16_t {
         uint32_t x;
         memcpy(&x, &f, sizeof(x));
 
-        uint16_t sign = (x >> 31) << 15;
-        uint16_t mantissa = (x & 0x7FFFFF) >> 13;
+        uint16_t sign = static_cast<uint16_t>((x >> 31) << 15);
+        uint16_t mantissa = static_cast<uint16_t>((x & 0x7FFFFF) >> 13);
         int32_t  exp = ((x >> 23) & 0xFF) - 127 + 15;
 
         if (exp <= 0)  return sign;           // underflow → ±0
@@ -89,28 +203,26 @@ std::vector<unsigned int> compress_vertices(std::vector<float> vertices) {
     std::vector<unsigned int> result;
 
     for (unsigned int i = 0; i < vertices.size(); i += 7) {
-        result.push_back(pack_float2_to_half2(vertices[i], vertices[i + 1]));
-        result.push_back(pack_float2_to_half2(vertices[i + 2], 0.0f));
-        result.push_back(pack_rgba_to_argb(vertices[i + 3], vertices[i + 4], vertices[i + 5], vertices[i + 6]));
+        result.push_back(pack_float2_to_half2(vertices.at(i), vertices.at(i + 1)));
+        result.push_back(std::bit_cast<uint32_t>(vertices.at(i + 2)));
+        result.push_back(pack_rgba_to_argb(vertices.at(i + 3), vertices.at(i + 4), vertices.at(i + 5), vertices.at(i + 6)));
     }
 
     return result;
 }
 
 std::vector<downscale_return_structure> downscale_parser(std::vector<std::string> shader_lines) {
-    // split into individual shaders
-
     std::vector<std::vector<std::string>> individual_shader_data;
     std::vector<std::string> temp;
 
     for (unsigned int i = 0; i < shader_lines.size(); i++) {
-        if (shader_lines[i] == "[BREAKHERE]") {
+        if (shader_lines.at(i) == "[BREAKHERE]") {
             individual_shader_data.push_back(temp);
             temp = {};
             continue;
         }
 
-        temp.push_back(shader_lines[i]);
+        temp.push_back(shader_lines.at(i));
     }
 
     // Split shader data into the shader code and dispatch info
@@ -122,29 +234,30 @@ std::vector<downscale_return_structure> downscale_parser(std::vector<std::string
         unsigned int dispatchx = 0;
         unsigned int dispatchy = 0;
 
-        for (unsigned int j = 0; j < individual_shader_data[i].size(); j++) {
-            if (individual_shader_data[i][j] == "[DISPATCHINFO]") {
-                std::string target_info = individual_shader_data[i][j + 1];
+
+        for (unsigned int j = 0; j < individual_shader_data.at(i).size(); j++) {
+            if (individual_shader_data.at(i).at(j) == "[DISPATCHINFO]") {
+                std::string target_info = individual_shader_data.at(i).at(j + 1);
                 std::string dispatchx_str = "";
                 std::string dispatchy_str = "";
                 bool dispatchx_mode = true;
 
                 for (unsigned int k = 1; k < target_info.size(); k++) {
-                    if (target_info[k] == ']') {
+                    if (target_info.at(k) == ']') {
                         break;
                     }
 
-                    if (target_info[k] == ',') {
+                    if (target_info.at(k) == ',') {
                         dispatchx_mode = false;
                         continue;
                     }
 
                     if (dispatchx_mode) {
-                        dispatchx_str += target_info[k];
+                        dispatchx_str += target_info.at(k);
                         continue;
                     }
 
-                    dispatchy_str += target_info[k];
+                    dispatchy_str += target_info.at(k);
                 }
 
                 dispatchx = std::stoi(dispatchx_str);
@@ -153,7 +266,7 @@ std::vector<downscale_return_structure> downscale_parser(std::vector<std::string
                 break;
             }
 
-            shader_code += individual_shader_data[i][j] + "\n";
+            shader_code += individual_shader_data.at(i).at(j) + "\n";
         }
 
         downscale_shader_return.push_back({ shader_code, dispatchx, dispatchy });
@@ -162,54 +275,54 @@ std::vector<downscale_return_structure> downscale_parser(std::vector<std::string
     return downscale_shader_return;
 }
 
-std::vector<std::string> generate_downscale_shader_lines(unsigned int width, unsigned int height) {
-    std::vector<std::string> script_lines = {};
-
-    for (unsigned int x = 1; x < ceil(log2(min(width, height))); x++) {
-        std::vector<unsigned int> outputres = { unsigned int(floor(width / pow(2, x))), unsigned int(floor(height / pow(2, x))) };
-        unsigned int numthreadsx = 0;
-        unsigned int numthreadsy = 0;
-
-        if (outputres[0] % 32 == 0) {
-            numthreadsx = 32;
-        }
-        else {
-            for (unsigned int i = 1; i < 6; i++) {
-                if (unsigned int(unsigned int(outputres[0]) % unsigned int(pow(2, i))) != 0) {
-                    numthreadsx = unsigned int(pow(2, i - 1));
-                    break;
-                }
-            }
-        }
-
-        if (outputres[1] % 32 == 0) {
-            numthreadsy = 32;
-        }
-        else {
-            for (unsigned int i = 1; i < 6; i++) {
-                if (unsigned int(unsigned int(outputres[1]) % unsigned int(pow(2, i))) != 0) {
-                    numthreadsy = int(pow(2, i - 1));
-                    break;
-                }
-            }
-        }
-
-        script_lines.push_back("Texture2D<float> mip_src_tex : register(t0);");
-        script_lines.push_back("RWTexture2D<float> mip_dst_tex : register(u0);");
-        script_lines.push_back("[numthreads(" + std::to_string(numthreadsx) + ", " + std::to_string(numthreadsy) + ", 1)]");
-        script_lines.push_back("void main(uint3 groupID : SV_GroupID, uint3 threadID : SV_GroupThreadID) {");
-        script_lines.push_back("int2 src_xy = int2(groupID.x * " + std::to_string(numthreadsx) + " + threadID.x, groupID.y * " + std::to_string(numthreadsy) + " + threadID.y);");
-        script_lines.push_back("int2 src_xy_scale = src_xy * 2;");
-        script_lines.push_back("float a = mip_src_tex[src_xy_scale + int2(0, 0)];");
-        script_lines.push_back("float b = mip_src_tex[src_xy_scale + int2(1, 0)];");
-        script_lines.push_back("float c = mip_src_tex[src_xy_scale + int2(0, 1)];");
-        script_lines.push_back("float d = mip_src_tex[src_xy_scale + int2(1, 1)];");
-        script_lines.push_back("mip_dst_tex[src_xy] = max(max(a, b), max(c, d));");
-        script_lines.push_back("}");
-        script_lines.push_back("[DISPATCHINFO]");
-        script_lines.push_back("[" + std::to_string(unsigned int(width / numthreadsx / pow(2, x))) + ", " + std::to_string(unsigned int(height / numthreadsy / pow(2, x))) + "]");
-        script_lines.push_back("[BREAKHERE]");
+class FPSCounter {
+private:
+    high_resolution_clock now;
+    unsigned long long frame_counter = 0;
+public:
+    FPSCounter() {
+        now = std::chrono::high_resolution_clock::now();
     }
 
-    return script_lines;
+    FPSReturn check_fps() {
+        frame_counter++;
+        high_resolution_clock later = std::chrono::high_resolution_clock::now();
+        FPSReturn return_fps = { false, 0 };
+        if (std::chrono::duration<double, std::milli>(later - now).count() >= 1000.0f) {
+            now = later;
+            return_fps = { true, frame_counter };
+            frame_counter = 0;
+        }
+
+        return return_fps;
+    }
+};
+
+void send_message(MSG msg) {
+    while (PeekMessageW(&msg, 0, 0, 0, PM_REMOVE)) {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+}
+
+void create_wndclass(LPCWSTR lp_class_name, WNDPROC w_proc) {
+    WNDCLASS w_class = {};
+    w_class.lpszClassName = lp_class_name;
+    w_class.lpfnWndProc = w_proc;
+
+    RegisterClassW(&w_class);
+}
+
+template<typename T> void release_all_ComPtr(std::vector<ComPtr<T>> ComPtr_to_release) {
+    for (auto& el : ComPtr_to_release) {
+        if (el) el->Release();
+    }
+}
+
+std::vector<unsigned int> client_dimensions(HWND window) {
+    RECT rect;
+    if (GetClientRect(window, &rect)) {
+        // For a client rect, rect.left and rect.top are always 0
+        return { static_cast<unsigned int>(rect.right), static_cast<unsigned int>(rect.bottom) };
+    }
 }
