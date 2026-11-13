@@ -201,15 +201,23 @@ int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_
 	D3D11_BUFFER_DESC vertex_buffer_desc = {};
 	vertex_buffer_desc.ByteWidth = static_cast<unsigned int>(sizeof(float)) * (compressed_vertices.size());
 	vertex_buffer_desc.Usage = D3D11_USAGE_DEFAULT;
-	vertex_buffer_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+	vertex_buffer_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
 	vertex_buffer_desc.CPUAccessFlags = 0;
 	vertex_buffer_desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
 	vertex_buffer_desc.StructureByteStride = static_cast<unsigned int>(sizeof(float));
 
+	device->CreateBuffer(&vertex_buffer_desc, nullptr, &vertex_buffer);
+
+	ComPtr<ID3D11Buffer> vertex_staging_buffer;
+	D3D11_BUFFER_DESC vertex_staging_desc = vertex_buffer_desc;
+	vertex_staging_desc.Usage = D3D11_USAGE_DYNAMIC;
+	vertex_staging_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+	vertex_staging_desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+
 	D3D11_SUBRESOURCE_DATA vertex_buffer_data = {};
 	vertex_buffer_data.pSysMem = compressed_vertices.data();
 
-	device->CreateBuffer(&vertex_buffer_desc, &vertex_buffer_data, &vertex_buffer);
+	device->CreateBuffer(&vertex_staging_desc, &vertex_buffer_data, &vertex_staging_buffer);
 
 	ComPtr<ID3D11ShaderResourceView> vertex_buffer_SRV;
 	D3D11_SHADER_RESOURCE_VIEW_DESC vertex_buffer_SRV_desc = {};
@@ -220,6 +228,20 @@ int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_
 	vertex_buffer_SRV_desc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
 
 	device->CreateShaderResourceView(vertex_buffer.Get(), &vertex_buffer_SRV_desc, &vertex_buffer_SRV);
+
+	ComPtr<ID3D11ShaderResourceView> vertex_staging_SRV;
+	device->CreateShaderResourceView(vertex_staging_buffer.Get(), &vertex_buffer_SRV_desc, &vertex_staging_SRV);
+	
+	ComPtr<ID3D11UnorderedAccessView> vertex_buffer_UAV;
+	D3D11_UNORDERED_ACCESS_VIEW_DESC vertex_buffer_UAV_desc = {};
+	vertex_buffer_UAV_desc.Buffer.FirstElement = 0;
+	vertex_buffer_UAV_desc.Buffer.Flags = 0;
+	vertex_buffer_UAV_desc.Buffer.NumElements = compressed_vertices.size();
+	vertex_buffer_UAV_desc.Format = DXGI_FORMAT_UNKNOWN;
+	vertex_buffer_UAV_desc.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
+
+	device->CreateUnorderedAccessView(vertex_buffer.Get(), &vertex_buffer_UAV_desc, &vertex_buffer_UAV);
+
 	hzb_culler->create_HZB_mips(width, height);
 	hzb_culler->create_HZB_shaders(width, height);
 
@@ -279,11 +301,119 @@ int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_
 
 	ctx->RSSetState(rs.Get());
 
+	ComPtr<ID3D11ComputeShader> cs;
+	std::string cs_src = R"(
+		StructuredBuffer<uint> vertices_in : register(t0);    // vertex_staging_SRV
+		RWStructuredBuffer<uint> vertices_out : register(u0); // vertex_buffer_UAV
+
+		#define pi 3.14159265
+		#define ax (pi / 4)
+		#define ay 0
+		#define az 0
+
+		#define cam_dist 3.0f   // camera distance from the rotation pivot; must be > max_r
+		#define max_r    1.5f   // largest |p.z| any rotation can produce
+
+		float2 unpack_uint_to_2float16(uint packed) {
+			float2 unpacked;
+			unpacked.x = f16tof32(packed & 0xFFFF);
+			unpacked.y = f16tof32(packed >> 16);
+			return unpacked;
+		}
+
+		uint pack_float2_to_half2(float2 v) {
+			return f32tof16(v.x) | (f32tof16(v.y) << 16);
+		}
+
+		float3 rotate_xyz(float3 v, float rx, float ry, float rz) {
+			float sx, cx, sy, cy, sz, cz;
+			sincos(rx, sx, cx);
+			sincos(ry, sy, cy);
+			sincos(rz, sz, cz);
+
+			// Rotate about X
+			v = float3(
+				v.x,
+				v.y * cx - v.z * sx,
+				v.y * sx + v.z * cx
+			);
+
+			// Rotate about Y
+			v = float3(
+				v.x * cy + v.z * sy,
+				v.y,
+				-v.x * sy + v.z * cy
+			);
+
+			// Rotate about Z
+			v = float3(
+				v.x * cz - v.y * sz,
+				v.x * sz + v.y * cz,
+				v.z
+			);
+
+			return v;
+		}
+
+		[numthreads(256, 1, 1)]
+		void main(uint3 threadID : SV_DispatchThreadID) {
+			uint num_uints, stride;
+			vertices_out.GetDimensions(num_uints, stride);
+
+			uint vertex_ID = threadID.x * 3;          // one thread per vertex
+			if (vertex_ID + 2 >= num_uints) return;
+
+			float2 xy = unpack_uint_to_2float16(vertices_in[vertex_ID]);
+			float z = asfloat(vertices_in[vertex_ID + 1]);
+
+			float3 p = float3(xy, (z - 0.5f) * 0.2f); // thin slab centered on the pivot
+			p = rotate_xyz(p, ax, ay, az);
+
+			// Distance from the camera to this vertex
+			float w = cam_dist + p.z;
+
+			// Perspective: nearer -> larger, farther -> smaller and pulled toward the center
+			float2 screen = p.xy * (cam_dist / w);
+
+			// Map w to [0, 1] depth like a projection matrix (stays linear across each triangle on screen)
+			const float n = cam_dist - max_r;
+			const float f = cam_dist + max_r;
+			float depth = (f / (f - n)) * (1.0f - n / w);
+
+			vertices_out[vertex_ID]     = pack_float2_to_half2(screen);
+			vertices_out[vertex_ID + 1] = asuint(depth);
+			vertices_out[vertex_ID + 2] = vertices_in[vertex_ID + 2];
+		}
+	)";
+
+	hr = D3DCompile(cs_src.c_str(), strlen(cs_src.c_str()), nullptr, nullptr, nullptr, "main", "cs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &shader_blob, &error_blob);
+	if (FAILED(hr)) {
+		if (error_blob.Get()->GetBufferSize() > 0) {
+			OutputDebugStringA((const char*)error_blob.Get()->GetBufferPointer());
+		}
+	}
+
+	device->CreateComputeShader(shader_blob.Get()->GetBufferPointer(), shader_blob.Get()->GetBufferSize(), nullptr, &cs);
+
+	// The compute shader takes vertex_staging_SRV -> vertex_buffer_UAV
+
 	if (occlusion) {
 		while (running) {
 			send_message(msg);
 			unsigned int num_mips = static_cast<unsigned int>(ceil(log2(static_cast<float>(min(width, height)))));
 			unsigned int dispatchX = (static_cast<unsigned int>(num_triangles) + 127) / 128;
+			unsigned int num_vertices = static_cast<unsigned int>(num_triangles * 3);
+			unsigned int cs_groups = (num_vertices + 255) / 256;
+
+			ctx->CSSetShader(cs.Get(), nullptr, 0);
+			ctx->CSSetUnorderedAccessViews(0, 1, vertex_buffer_UAV.GetAddressOf(), nullptr);
+			ctx->CSSetShaderResources(0, 1, vertex_staging_SRV.GetAddressOf());
+			ctx->Dispatch(cs_groups, 1, 1);
+
+			ID3D11UnorderedAccessView* null_uav = nullptr;
+			ID3D11ShaderResourceView* null_srv = nullptr;
+			ctx->CSSetUnorderedAccessViews(0, 1, &null_uav, nullptr);
+			ctx->CSSetShaderResources(0, 1, &null_srv);
 
 			std::vector<ID3D11ShaderResourceView*> render_SRVs = hzb_culler->cull(vertex_buffer_SRV, dispatchX, ps, clear_color, width, height, DSV_return_resize, RTV);
 
@@ -302,6 +432,17 @@ int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_
 	else {
 		while (running) {
 			send_message(msg);
+			unsigned int num_vertices = static_cast<unsigned int>(num_triangles * 3);
+			unsigned int cs_groups = (num_vertices + 255) / 256;
+
+			ctx->CSSetShader(cs.Get(), nullptr, 0);
+			ctx->CSSetUnorderedAccessViews(0, 1, vertex_buffer_UAV.GetAddressOf(), nullptr);
+			ctx->CSSetShaderResources(0, 1, vertex_staging_SRV.GetAddressOf());
+			ctx->Dispatch(cs_groups, 1, 1);
+			ID3D11UnorderedAccessView* null_uav = nullptr;
+			ID3D11ShaderResourceView* null_srv = nullptr;
+			ctx->CSSetUnorderedAccessViews(0, 1, &null_uav, nullptr);
+			ctx->CSSetShaderResources(0, 1, &null_srv);
 			hzb_culler->set_default_vs();
 			ctx->VSSetShaderResources(0, 1, vertex_buffer_SRV.GetAddressOf());
 			ctx->PSSetShader(ps.Get(), nullptr, 0);
@@ -311,7 +452,7 @@ int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_
 			ctx->OMSetRenderTargets(1, RTV.GetAddressOf(), DSV.Get());
 			ctx->Draw(num_triangles * 3, 0);
 
-			swapchain->Present(1, 0);
+			swapchain->Present(0, 0);
 
 			FPSReturn fps = fps_counter.check_fps();
 			if (fps.second) SetWindowTextA(window, std::to_string(fps.frames_passed).c_str());
