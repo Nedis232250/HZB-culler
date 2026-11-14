@@ -17,7 +17,7 @@ static bool running = true;
 HWND window;
 unsigned int width = 1920;
 unsigned int height = 1080;
-unsigned long long num_triangles = 5000000;
+unsigned long long num_triangles = 1000000;
 using namespace Microsoft::WRL;
 bool created = false;
 
@@ -105,7 +105,7 @@ int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_
 		}
 
 		float4 main(VSOutput input) : SV_TARGET {
-			return float4(0.75 * unpackARGB(input.color).xyz + 0.125, 1.0f);
+			return float4(unpackARGB(input.color).xyz, 1.0f);
 		}
 	)";
 
@@ -196,6 +196,9 @@ int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_
 	std::cout << "triangles loaded: " << compressed_vertices.size() / 9 << "\n";
 
 	hzb_culler.emplace(device, ctx, debug, num_triangles);
+
+	D3D11_SUBRESOURCE_DATA vertex_buffer_data = {};
+	vertex_buffer_data.pSysMem = compressed_vertices.data();
 	
 	ComPtr<ID3D11Buffer> vertex_buffer;
 	D3D11_BUFFER_DESC vertex_buffer_desc = {};
@@ -206,6 +209,7 @@ int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_
 	vertex_buffer_desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
 	vertex_buffer_desc.StructureByteStride = static_cast<unsigned int>(sizeof(float));
 
+	//device->CreateBuffer(&vertex_buffer_desc, nullptr, &vertex_buffer);
 	device->CreateBuffer(&vertex_buffer_desc, nullptr, &vertex_buffer);
 
 	ComPtr<ID3D11Buffer> vertex_staging_buffer;
@@ -214,9 +218,7 @@ int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_
 	vertex_staging_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
 	vertex_staging_desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 
-	D3D11_SUBRESOURCE_DATA vertex_buffer_data = {};
-	vertex_buffer_data.pSysMem = compressed_vertices.data();
-
+	//device->CreateBuffer(&vertex_staging_desc, &vertex_buffer_data, &vertex_staging_buffer);
 	device->CreateBuffer(&vertex_staging_desc, &vertex_buffer_data, &vertex_staging_buffer);
 
 	ComPtr<ID3D11ShaderResourceView> vertex_buffer_SRV;
@@ -306,6 +308,10 @@ int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_
 		StructuredBuffer<uint> vertices_in : register(t0);    // vertex_staging_SRV
 		RWStructuredBuffer<uint> vertices_out : register(u0); // vertex_buffer_UAV
 
+		#define GROUP_W 32
+		#define GROUP_H 8
+		#define THREADS_PER_GROUP (GROUP_W * GROUP_H)   // 128
+		#define MAX_GROUPS_X 65535
 		#define pi 3.14159265
 		#define ax (pi / 4)
 		#define ay 0
@@ -355,12 +361,20 @@ int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_
 			return v;
 		}
 
-		[numthreads(256, 1, 1)]
-		void main(uint3 threadID : SV_DispatchThreadID) {
+		[numthreads(GROUP_W, GROUP_H, 1)]
+		void main(uint3 groupID : SV_GroupID, uint groupIndex : SV_GroupIndex) {
 			uint num_uints, stride;
 			vertices_out.GetDimensions(num_uints, stride);
 
-			uint vertex_ID = threadID.x * 3;          // one thread per vertex
+			// Recompute the host's dispatch width from the buffer size (must match the C++ formula exactly)
+			uint num_vertices = num_uints / 3;
+			uint total_groups = (num_vertices + THREADS_PER_GROUP - 1) / THREADS_PER_GROUP;
+			uint groups_x     = min(total_groups, MAX_GROUPS_X);
+
+			// Flatten the 2D group grid, then add the thread's slot inside its 16x8 group (0..127)
+			uint group_flat  = groupID.y * groups_x + groupID.x;
+			uint thread_flat = group_flat * THREADS_PER_GROUP + groupIndex;   // one thread per vertex
+			uint vertex_ID   = thread_flat * 3;
 			if (vertex_ID + 2 >= num_uints) return;
 
 			float2 xy = unpack_uint_to_2float16(vertices_in[vertex_ID]);
@@ -403,12 +417,14 @@ int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_
 			unsigned int num_mips = static_cast<unsigned int>(ceil(log2(static_cast<float>(min(width, height)))));
 			unsigned int dispatchX = (static_cast<unsigned int>(num_triangles) + 127) / 128;
 			unsigned int num_vertices = static_cast<unsigned int>(num_triangles * 3);
-			unsigned int cs_groups = (num_vertices + 255) / 256;
+			UINT total_groups = (num_vertices + 255) / 256;
+			UINT groups_x = min(total_groups, 65535u);
+			UINT groups_y = (total_groups + groups_x - 1) / groups_x;
 
 			ctx->CSSetShader(cs.Get(), nullptr, 0);
 			ctx->CSSetUnorderedAccessViews(0, 1, vertex_buffer_UAV.GetAddressOf(), nullptr);
 			ctx->CSSetShaderResources(0, 1, vertex_staging_SRV.GetAddressOf());
-			ctx->Dispatch(cs_groups, 1, 1);
+			ctx->Dispatch(groups_x, groups_y, 1);
 
 			ID3D11UnorderedAccessView* null_uav = nullptr;
 			ID3D11ShaderResourceView* null_srv = nullptr;
@@ -433,12 +449,14 @@ int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_
 		while (running) {
 			send_message(msg);
 			unsigned int num_vertices = static_cast<unsigned int>(num_triangles * 3);
-			unsigned int cs_groups = (num_vertices + 255) / 256;
+			UINT total_groups = (num_vertices + 255) / 256;
+			UINT groups_x = min(total_groups, 65535u);
+			UINT groups_y = (total_groups + groups_x - 1) / groups_x;
 
 			ctx->CSSetShader(cs.Get(), nullptr, 0);
 			ctx->CSSetUnorderedAccessViews(0, 1, vertex_buffer_UAV.GetAddressOf(), nullptr);
 			ctx->CSSetShaderResources(0, 1, vertex_staging_SRV.GetAddressOf());
-			ctx->Dispatch(cs_groups, 1, 1);
+			ctx->Dispatch(groups_x, groups_y, 1);
 			ID3D11UnorderedAccessView* null_uav = nullptr;
 			ID3D11ShaderResourceView* null_srv = nullptr;
 			ctx->CSSetUnorderedAccessViews(0, 1, &null_uav, nullptr);
