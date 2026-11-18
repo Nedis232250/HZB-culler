@@ -29,8 +29,10 @@ struct downscale_return_structure {
 struct FPSReturn {
     bool second;
     unsigned long long frames_passed;
+    double seconds_passed;
 };
 
+// AI Generated boilerplate
 void attach_console() {
     if (AllocConsole()) {
         FILE* file;
@@ -42,6 +44,7 @@ void attach_console() {
 //
 // Pray to god this doesn't have any undefined behavior because I have zero idea how this works
 // 
+// AI Generated boilerplate
 int find_cores() {
     DWORD bytes = 0;
 
@@ -82,6 +85,7 @@ int find_cores() {
 //
 // (update this count)
 //
+// AI Generated boilerplate
 std::vector<float> load_vertices(const char* path, unsigned long long num_triangles, unsigned int kThreads) {
     if (kThreads == 0) {
         kThreads = static_cast<unsigned int>(find_cores());
@@ -166,6 +170,7 @@ std::vector<float> load_vertices(const char* path, unsigned long long num_triang
 //
 // NOT BF16
 //
+// AI Generated boilerplate
 uint32_t pack_float2_to_half2(float a, float b) {
     auto to_f16 = [](float f) -> uint16_t {
         uint32_t x;
@@ -187,6 +192,7 @@ uint32_t pack_float2_to_half2(float a, float b) {
     return ((uint32_t)hb << 16) | ha;
 }
 
+// AI Generated boilerplate
 uint32_t pack_rgba_to_argb(float r, float g, float b, float a) {
     uint8_t ri = (uint8_t)(r * 255.0f + 0.5f);
     uint8_t gi = (uint8_t)(g * 255.0f + 0.5f);
@@ -288,9 +294,10 @@ public:
         frame_counter++;
         high_resolution_clock later = std::chrono::high_resolution_clock::now();
         FPSReturn return_fps = { false, 0 };
-        if (std::chrono::duration<double, std::milli>(later - now).count() >= 1000.0f) {
+        double count = std::chrono::duration<double, std::milli>(later - now).count();
+        if (std::chrono::duration<double, std::milli>(count).count() >= 1000.0f) {
             now = later;
-            return_fps = { true, frame_counter };
+            return_fps = { true, frame_counter, count };
             frame_counter = 0;
         }
 
@@ -319,6 +326,7 @@ template<typename T> void release_all_ComPtr(std::vector<ComPtr<T>> ComPtr_to_re
     }
 }
 
+// AI Generated boilerplate
 std::vector<unsigned int> client_dimensions(HWND window) {
     RECT rect;
     if (GetClientRect(window, &rect)) {
@@ -331,7 +339,6 @@ struct swapchain_return {
     ComPtr<IDXGISwapChain> swpachain;
     ComPtr<ID3D11RenderTargetView> RTV;
 };
-
 
 swapchain_return create_swapchain(unsigned int width, unsigned int height, HWND window, ComPtr<IDXGIFactory> factory, ComPtr<ID3D11Device> device) {
     ComPtr<IDXGISwapChain> swapchain;
@@ -776,3 +783,12 @@ status_buffer_return create_status_buffer(unsigned int element_width, unsigned i
 
 #define KILLCOMPTRREF {
 #define EXITKILL }
+
+// AI Generated boilerplate
+bool is_int(std::string_view str) {
+    long long val;
+    auto [ptr, ec] = std::from_chars(str.data(), str.data() + str.size(), val);
+
+    // Valid if there are no errors (like overflow) and the whole string was parsed
+    return ec == std::errc() && ptr == str.data() + str.size();
+}
