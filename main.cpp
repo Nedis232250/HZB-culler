@@ -18,7 +18,6 @@ static bool running = true;
 HWND window;
 unsigned int width = 1920;
 unsigned int height = 1080;
-unsigned long long num_triangles = 1250000;
 using namespace Microsoft::WRL;
 bool created = false;
 ID3D11UnorderedAccessView* null_uav = nullptr;
@@ -92,6 +91,7 @@ LRESULT w_proc(HWND wnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 }
 
 int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_instance, [[maybe_unused]] LPSTR lp_cmdln, int n_cmd_show) {
+	// AI Generated for occlusion culling proof of concept in Pixel Shader intensive tasks
 	std::string ps_src = R"(
 		// =====================================================================
 		//  "Stained Glass Nebula" pixel shader (integrated-GPU edition)
@@ -363,6 +363,32 @@ int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_
 
 	std::cout << "\n";
 
+	unsigned int num_triangles = 1;
+	while (true) {
+		std::cout << "Set num_triangles (D/d for default, 5,000,000, PS/ps/Ps/pS, 1,250,000, a # for custom):\n";
+		std::cin >> answer;
+
+		if (answer == "D" || answer == "d") {
+			std::cout << "\nnum_triangles set to 5,000,000.\n";
+			num_triangles = 5000000;
+			break;
+		}
+		else if (answer == "PS" || answer == "Ps" || answer == "pS" || answer == "ps") {
+			std::cout << "\nnum_triangles set to 1,250,000\n";
+			num_triangles = 1250000;
+			break;
+		}
+		else if (is_int(answer)) {
+			std::cout << "\nnum_triangles set to " << answer << "\n";
+			num_triangles = std::stoi(answer);
+			break;
+		} else {
+			std::cout << "\nInvalid answer.\n";
+		}
+	}
+
+	std::cout << "\n";
+
 	unsigned int flags0_device_creation = 0;
 	unsigned int flags0_factory_creation = 0;
 	if (debug) {
@@ -488,6 +514,7 @@ int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_
 	ctx->RSSetState(rs.Get());
 
 	ComPtr<ID3D11ComputeShader> cs;
+	// AI Generated for occlusion culling proof of concept in Pixel Shader intensive tasks
 	std::string cs_src = R"(
 		StructuredBuffer<uint> vertices_in : register(t0);    // vertex_staging_SRV
 		RWStructuredBuffer<uint> vertices_out : register(u0); // vertex_buffer_UAV
@@ -603,6 +630,7 @@ int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_
 
 	if (occlusion) {
 		while (running) {
+			high_resolution_clock start = std::chrono::high_resolution_clock::now();
 			send_message(msg);
 			unsigned int num_mips = static_cast<unsigned int>(ceil(log2(static_cast<float>(min(width, height)))));
 			
@@ -624,12 +652,15 @@ int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_
 
 			swapchain->Present(0, 0);
 
+			high_resolution_clock end = std::chrono::high_resolution_clock::now();
+
 			FPSReturn fps = fps_counter.check_fps();
-			if (fps.second) SetWindowTextA(window, std::to_string(1000.0f / static_cast<float>(fps.frames_passed)).c_str());
+			if (fps.second) SetWindowTextA(window, std::to_string(std::chrono::duration<double, std::milli>(end - start).count()).c_str());
 		}
 	}
 	else {
 		while (running) {
+			high_resolution_clock start = std::chrono::high_resolution_clock::now();
 			send_message(msg);
 
 			ctx->CSSetShader(cs.Get(), nullptr, 0);
@@ -649,8 +680,10 @@ int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_
 
 			swapchain->Present(0, 0);
 
+			high_resolution_clock end = std::chrono::high_resolution_clock::now();
+
 			FPSReturn fps = fps_counter.check_fps();
-			if (fps.second) SetWindowTextA(window, std::to_string(1000.0f / static_cast<float>(fps.frames_passed)).c_str());
+			if (fps.second) SetWindowTextA(window, std::to_string(std::chrono::duration<double, std::milli>(end - start).count()).c_str());
 		}
 	}
 
