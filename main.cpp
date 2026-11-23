@@ -91,208 +91,7 @@ LRESULT w_proc(HWND wnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 }
 
 int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_instance, [[maybe_unused]] LPSTR lp_cmdln, int n_cmd_show) {
-	// AI Generated for occlusion culling proof of concept in Pixel Shader intensive tasks
-	std::string ps_src = R"(
-		// =====================================================================
-		//  "Stained Glass Nebula" pixel shader (integrated-GPU edition)
-		//  Inputs used: SV_Position + packed ARGB colour. Nothing else.
-		//  No buffers, no UAVs, no SRVs, no cbuffers, no samplers.
-		//
-		//  Per pixel (once, no supersampling):
-		//    - one domain warp: 3 fBm calls x WARP_OCTAVES of value noise
-		//    - normal from screen-space derivatives (free, no extra noise)
-		//    - 3x3 Voronoi for the glass cells and lead lines
-		//    - NEBULA_STEPS-step gyroid glow
-		// =====================================================================
-
-		struct VSOutput {
-			float4 position : SV_Position;
-			uint   color    : TEXCOORD0;
-		};
-
-		#define WARP_OCTAVES  24     // 3..5. Each step adds about 25% to the noise cost
-		#define NEBULA_STEPS  16     // 4..16. Set to 0 to turn the nebula off
-		#define PI   3.14159265
-		#define TAU  6.28318531
-
-		// ---------------------------------------------------------------------
-		float4 unpackARGB(uint packed) {
-			float4 color;
-			color.b = float( packed        & 0xFF);
-			color.g = float((packed >> 8)  & 0xFF);
-			color.r = float((packed >> 16) & 0xFF);
-			color.a = float((packed >> 24) & 0xFF);
-			return color / 255.0f;
-		}
-
-		// ---------------------------------------------------------------------
-		//  Hashing: one PCG round per lattice point
-		// ---------------------------------------------------------------------
-		uint pcg(uint v) {
-			uint state = v * 747796405u + 2891336453u;
-			uint word  = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
-			return (word >> 22u) ^ word;
-		}
-
-		uint hashCell(int2 c, uint seed) {
-			return pcg(asuint(c.x) * 1597334673u ^ asuint(c.y) * 3812015801u ^ seed);
-		}
-
-		float hashI(int2 c, uint seed) {
-			return float(hashCell(c, seed)) * (1.0 / 4294967296.0);
-		}
-
-		float2 hash2I(int2 c, uint seed) {
-			uint h = hashCell(c, seed);
-			return float2(float(h & 0xFFFFu), float(h >> 16)) * (1.0 / 65535.0);
-		}
-
-		// ---------------------------------------------------------------------
-		//  Value noise / fBm / domain warp
-		// ---------------------------------------------------------------------
-		float vnoise(float2 p, uint seed) {
-			int2   i = int2(floor(p));
-			float2 f = frac(p);
-			float2 u = f * f * (3.0 - 2.0 * f);   // cubic fade (cheaper than quintic)
-
-			float a = hashI(i,              seed);
-			float b = hashI(i + int2(1, 0), seed);
-			float c = hashI(i + int2(0, 1), seed);
-			float d = hashI(i + int2(1, 1), seed);
-			return lerp(lerp(a, b, u.x), lerp(c, d, u.x), u.y);
-		}
-
-		float fbm(float2 p, uint seed) {
-			const float2x2 R = float2x2(1.6, 1.2, -1.2, 1.6);   // rotation x2 in one matrix
-			float sum = 0.0;
-			float amp = 0.5;
-			[unroll]
-			for (int i = 0; i < WARP_OCTAVES; i++) {
-				sum += amp * vnoise(p, seed + (uint)i * 0x632BE5ABu);
-				p    = mul(R, p);
-				amp *= 0.5;
-			}
-			return sum * (1.0 / (1.0 - exp2(-WARP_OCTAVES)));   // normalise to roughly 0..1
-		}
-
-		// A single warp level: f(p + 4 q(p)), 3 fBm calls (was 5 before, done 3 times)
-		float warped(float2 p, uint seed, out float2 q) {
-			q = float2(fbm(p,                    seed),
-					   fbm(p + float2(5.2, 1.3), seed));
-			return fbm(p + 3.5 * q, seed);
-		}
-
-		// ---------------------------------------------------------------------
-		//  Voronoi 3x3: returns (F1, F2, cell id)
-		// ---------------------------------------------------------------------
-		float3 voronoi(float2 p, uint seed) {
-			int2   n  = int2(floor(p));
-			float2 f  = frac(p);
-			float  f1 = 8.0, f2 = 8.0, id = 0.0;
-
-			[unroll]
-			for (int j = -1; j <= 1; j++) {
-				[unroll]
-				for (int i = -1; i <= 1; i++) {
-					int2   g  = int2(i, j);
-					float2 o  = hash2I(n + g, seed);
-					float2 d  = float2(g) + o - f;
-					float  dd = dot(d, d);
-					if (dd < f1)      { f2 = f1; f1 = dd; id = o.x; }
-					else if (dd < f2) { f2 = dd; }
-				}
-			}
-			return float3(sqrt(f1), sqrt(f2), id);
-		}
-
-		// ---------------------------------------------------------------------
-		float3 hueRotate(float3 c, float a) {          // Rodrigues around the grey axis
-			const float3 k = 0.57735027;
-			float ca = cos(a), sa = sin(a);
-			return c * ca + cross(k, c) * sa + k * dot(k, c) * (1.0 - ca);
-		}
-
-		// ---------------------------------------------------------------------
-		//  Cheap nebula: a few fixed-size steps through a single gyroid
-		// ---------------------------------------------------------------------
-		float gyroid(float3 p) { return dot(sin(p), cos(p.yzx)); }
-
-		float3 nebula(float2 uv, float3 tint, uint seed) {
-			float3 acc = 0.0;
-		#if NEBULA_STEPS > 0
-			float3 ro = float3(uv * 3.0, float(seed & 255u) * 0.37);
-			float3 rd = normalize(float3(uv * 0.6 - 0.3, 1.0));
-			const float dt = 6.0 / NEBULA_STEPS;
-			[unroll]
-			for (int i = 0; i < NEBULA_STEPS; i++) {
-				float  t    = (float(i) + 0.5) * dt;
-				float  d    = abs(gyroid((ro + rd * t) * 2.0));
-				float  dens = exp2(-d * 8.0);
-				float3 band = 0.5 + 0.5 * cos(TAU * (t * 0.15 + float3(0.0, 0.33, 0.67)) + d * 4.0);
-				acc += dens * band * exp2(-t * 0.25);
-			}
-			acc *= tint * (2.0 / NEBULA_STEPS);
-		#endif
-			return acc;
-		}
-
-		// ---------------------------------------------------------------------
-		float4 main(VSOutput input) : SV_TARGET {
-			float3 base = unpackARGB(input.color).rgb;
-			uint   seed = pcg(input.color);
-			float2 px   = input.position.xy;
-			const float SCALE = 0.0035;
-			float2 p = px * SCALE;
-
-			// 1. Height field (one warp)
-			float2 q;
-			float h = warped(p, seed, q);
-
-			// 2. Normal from pixel-quad derivatives instead of two extra warps
-			float3 N = normalize(float3(-ddx(h) / SCALE, -ddy(h) / SCALE, 4.0));
-
-			// 3. Stained-glass cells, with lead lines antialiased by fwidth (no supersampling)
-			float3 v      = voronoi(p * 7.0 + q * 2.0, seed ^ 0x9E3779B9u);
-			float  border = v.y - v.x;
-			float  aa     = fwidth(border);
-			float  glassMask = smoothstep(0.03 - aa, 0.06 + aa, border);
-
-			// 4. Glass colour
-			float3 tint  = max(base, 0.04);
-			float3 glass = saturate(hueRotate(tint, (v.z - 0.5) * 2.2 + (h - 0.5) * 2.5));
-			glass *= 0.25 + 1.6 * h * h;
-			glass += tint * 0.6 * pow(saturate(length(q) * 0.9), 3.0);
-
-			// 5. Nebula behind the glass
-			float3 nebTint = lerp(tint, 1.0 - tint, saturate(length(q) - 0.4));
-			glass += 1.4 * nebula(p * 1.5 + q * 0.4, nebTint, seed);
-
-			// 6. Lighting
-			const float3 L = normalize(float3(-0.45, 0.55, 0.70));
-			const float3 H = normalize(L + float3(0.0, 0.0, 1.0));
-			float  ndl  = saturate(dot(N, L));
-			float  ndh  = saturate(dot(N, H));
-			float  fres = 0.04 + 0.96 * pow(1.0 - N.z, 5.0);
-			float3 film = 0.5 + 0.5 * cos(TAU * (h * 3.0 + float3(0.0, 0.33, 0.67)));
-			float3 lit  = glass * (0.35 + 0.9 * ndl)
-						+ (pow(ndh, 90.0) * 2.5 + fres * 0.8) * lerp(1.0, film, 0.75);
-
-			// 7. Lead lines with a bevel highlight
-			float  profile = saturate(border / 0.06);
-			float  bevel   = sin(profile * PI);
-			bevel *= bevel; bevel *= bevel;
-			float3 lead    = float3(0.025, 0.025, 0.03) + bevel * (0.08 + 0.35 * ndl) * float3(0.9, 0.95, 1.0);
-
-			float3 col = lerp(lead, lit, glassMask);
-
-			// ACES filmic tonemap + dither
-			col  = saturate((col * (2.51 * col + 0.03)) / (col * (2.43 * col + 0.59) + 0.14));
-			col += (hashI(int2(px), 0xABCDu) - 0.5) / 255.0;
-
-			return float4(col, 1.0f);
-		}
-	)";
-
+	std::string ps_src;
 	SetProcessDPIAware();
 	attach_console();
 
@@ -387,6 +186,242 @@ int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_
 		}
 	}
 
+	while (true) {
+		std::cout << "Nebula blur? (Y/y for yes, N/n for no):\n";
+		std::cin >> answer;
+
+		if (answer == "Y" || answer == "y") {
+			// AI Generated for occlusion culling proof of concept in Pixel Shader intensive tasks
+			std::string ps_src = R"(
+				// =====================================================================
+				//  "Stained Glass Nebula" pixel shader (integrated-GPU edition)
+				//  Inputs used: SV_Position + packed ARGB colour. Nothing else.
+				//  No buffers, no UAVs, no SRVs, no cbuffers, no samplers.
+				//
+				//  Per pixel (once, no supersampling):
+				//    - one domain warp: 3 fBm calls x WARP_OCTAVES of value noise
+				//    - normal from screen-space derivatives (free, no extra noise)
+				//    - 3x3 Voronoi for the glass cells and lead lines
+				//    - NEBULA_STEPS-step gyroid glow
+				// =====================================================================
+
+				struct VSOutput {
+					float4 position : SV_Position;
+					uint   color    : TEXCOORD0;
+				};
+
+				#define WARP_OCTAVES  24     // 3..5. Each step adds about 25% to the noise cost
+				#define NEBULA_STEPS  16     // 4..16. Set to 0 to turn the nebula off
+				#define PI   3.14159265
+				#define TAU  6.28318531
+
+				// ---------------------------------------------------------------------
+				float4 unpackARGB(uint packed) {
+					float4 color;
+					color.b = float( packed        & 0xFF);
+					color.g = float((packed >> 8)  & 0xFF);
+					color.r = float((packed >> 16) & 0xFF);
+					color.a = float((packed >> 24) & 0xFF);
+					return color / 255.0f;
+				}
+
+				// ---------------------------------------------------------------------
+				//  Hashing: one PCG round per lattice point
+				// ---------------------------------------------------------------------
+				uint pcg(uint v) {
+					uint state = v * 747796405u + 2891336453u;
+					uint word  = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+					return (word >> 22u) ^ word;
+				}
+
+				uint hashCell(int2 c, uint seed) {
+					return pcg(asuint(c.x) * 1597334673u ^ asuint(c.y) * 3812015801u ^ seed);
+				}
+
+				float hashI(int2 c, uint seed) {
+					return float(hashCell(c, seed)) * (1.0 / 4294967296.0);
+				}
+
+				float2 hash2I(int2 c, uint seed) {
+					uint h = hashCell(c, seed);
+					return float2(float(h & 0xFFFFu), float(h >> 16)) * (1.0 / 65535.0);
+				}
+
+				// ---------------------------------------------------------------------
+				//  Value noise / fBm / domain warp
+				// ---------------------------------------------------------------------
+				float vnoise(float2 p, uint seed) {
+					int2   i = int2(floor(p));
+					float2 f = frac(p);
+					float2 u = f * f * (3.0 - 2.0 * f);   // cubic fade (cheaper than quintic)
+
+					float a = hashI(i,              seed);
+					float b = hashI(i + int2(1, 0), seed);
+					float c = hashI(i + int2(0, 1), seed);
+					float d = hashI(i + int2(1, 1), seed);
+					return lerp(lerp(a, b, u.x), lerp(c, d, u.x), u.y);
+				}
+
+				float fbm(float2 p, uint seed) {
+					const float2x2 R = float2x2(1.6, 1.2, -1.2, 1.6);   // rotation x2 in one matrix
+					float sum = 0.0;
+					float amp = 0.5;
+					[unroll]
+					for (int i = 0; i < WARP_OCTAVES; i++) {
+						sum += amp * vnoise(p, seed + (uint)i * 0x632BE5ABu);
+						p    = mul(R, p);
+						amp *= 0.5;
+					}
+					return sum * (1.0 / (1.0 - exp2(-WARP_OCTAVES)));   // normalise to roughly 0..1
+				}
+
+				// A single warp level: f(p + 4 q(p)), 3 fBm calls (was 5 before, done 3 times)
+				float warped(float2 p, uint seed, out float2 q) {
+					q = float2(fbm(p,                    seed),
+							   fbm(p + float2(5.2, 1.3), seed));
+					return fbm(p + 3.5 * q, seed);
+				}
+
+				// ---------------------------------------------------------------------
+				//  Voronoi 3x3: returns (F1, F2, cell id)
+				// ---------------------------------------------------------------------
+				float3 voronoi(float2 p, uint seed) {
+					int2   n  = int2(floor(p));
+					float2 f  = frac(p);
+					float  f1 = 8.0, f2 = 8.0, id = 0.0;
+
+					[unroll]
+					for (int j = -1; j <= 1; j++) {
+						[unroll]
+						for (int i = -1; i <= 1; i++) {
+							int2   g  = int2(i, j);
+							float2 o  = hash2I(n + g, seed);
+							float2 d  = float2(g) + o - f;
+							float  dd = dot(d, d);
+							if (dd < f1)      { f2 = f1; f1 = dd; id = o.x; }
+							else if (dd < f2) { f2 = dd; }
+						}
+					}
+					return float3(sqrt(f1), sqrt(f2), id);
+				}
+
+				// ---------------------------------------------------------------------
+				float3 hueRotate(float3 c, float a) {          // Rodrigues around the grey axis
+					const float3 k = 0.57735027;
+					float ca = cos(a), sa = sin(a);
+					return c * ca + cross(k, c) * sa + k * dot(k, c) * (1.0 - ca);
+				}
+
+				// ---------------------------------------------------------------------
+				//  Cheap nebula: a few fixed-size steps through a single gyroid
+				// ---------------------------------------------------------------------
+				float gyroid(float3 p) { return dot(sin(p), cos(p.yzx)); }
+
+				float3 nebula(float2 uv, float3 tint, uint seed) {
+					float3 acc = 0.0;
+				#if NEBULA_STEPS > 0
+					float3 ro = float3(uv * 3.0, float(seed & 255u) * 0.37);
+					float3 rd = normalize(float3(uv * 0.6 - 0.3, 1.0));
+					const float dt = 6.0 / NEBULA_STEPS;
+					[unroll]
+					for (int i = 0; i < NEBULA_STEPS; i++) {
+						float  t    = (float(i) + 0.5) * dt;
+						float  d    = abs(gyroid((ro + rd * t) * 2.0));
+						float  dens = exp2(-d * 8.0);
+						float3 band = 0.5 + 0.5 * cos(TAU * (t * 0.15 + float3(0.0, 0.33, 0.67)) + d * 4.0);
+						acc += dens * band * exp2(-t * 0.25);
+					}
+					acc *= tint * (2.0 / NEBULA_STEPS);
+				#endif
+					return acc;
+				}
+
+				// ---------------------------------------------------------------------
+				float4 main(VSOutput input) : SV_TARGET {
+					float3 base = unpackARGB(input.color).rgb;
+					uint   seed = pcg(input.color);
+					float2 px   = input.position.xy;
+					const float SCALE = 0.0035;
+					float2 p = px * SCALE;
+
+					// 1. Height field (one warp)
+					float2 q;
+					float h = warped(p, seed, q);
+
+					// 2. Normal from pixel-quad derivatives instead of two extra warps
+					float3 N = normalize(float3(-ddx(h) / SCALE, -ddy(h) / SCALE, 4.0));
+
+					// 3. Stained-glass cells, with lead lines antialiased by fwidth (no supersampling)
+					float3 v      = voronoi(p * 7.0 + q * 2.0, seed ^ 0x9E3779B9u);
+					float  border = v.y - v.x;
+					float  aa     = fwidth(border);
+					float  glassMask = smoothstep(0.03 - aa, 0.06 + aa, border);
+
+					// 4. Glass colour
+					float3 tint  = max(base, 0.04);
+					float3 glass = saturate(hueRotate(tint, (v.z - 0.5) * 2.2 + (h - 0.5) * 2.5));
+					glass *= 0.25 + 1.6 * h * h;
+					glass += tint * 0.6 * pow(saturate(length(q) * 0.9), 3.0);
+
+					// 5. Nebula behind the glass
+					float3 nebTint = lerp(tint, 1.0 - tint, saturate(length(q) - 0.4));
+					glass += 1.4 * nebula(p * 1.5 + q * 0.4, nebTint, seed);
+
+					// 6. Lighting
+					const float3 L = normalize(float3(-0.45, 0.55, 0.70));
+					const float3 H = normalize(L + float3(0.0, 0.0, 1.0));
+					float  ndl  = saturate(dot(N, L));
+					float  ndh  = saturate(dot(N, H));
+					float  fres = 0.04 + 0.96 * pow(1.0 - N.z, 5.0);
+					float3 film = 0.5 + 0.5 * cos(TAU * (h * 3.0 + float3(0.0, 0.33, 0.67)));
+					float3 lit  = glass * (0.35 + 0.9 * ndl)
+								+ (pow(ndh, 90.0) * 2.5 + fres * 0.8) * lerp(1.0, film, 0.75);
+
+					// 7. Lead lines with a bevel highlight
+					float  profile = saturate(border / 0.06);
+					float  bevel   = sin(profile * PI);
+					bevel *= bevel; bevel *= bevel;
+					float3 lead    = float3(0.025, 0.025, 0.03) + bevel * (0.08 + 0.35 * ndl) * float3(0.9, 0.95, 1.0);
+
+					float3 col = lerp(lead, lit, glassMask);
+
+					// ACES filmic tonemap + dither
+					col  = saturate((col * (2.51 * col + 0.03)) / (col * (2.43 * col + 0.59) + 0.14));
+					col += (hashI(int2(px), 0xABCDu) - 0.5) / 255.0;
+
+					return float4(col, 1.0f);
+				}
+			)";
+			break;
+		}
+		else if (answer == "N" || answer == "n") {
+			ps_src = R"(
+				struct VSOutput {
+					float4 position : SV_Position;
+					uint   color    : TEXCOORD0;
+				};
+
+				float4 unpackARGB(uint packed) {
+					float4 color;
+					color.b = float( packed        & 0xFF);
+					color.g = float((packed >> 8)  & 0xFF);
+					color.r = float((packed >> 16) & 0xFF);
+					color.a = float((packed >> 24) & 0xFF);
+					return color / 255.0f;
+				}
+
+				float4 main(VSOutput input) : SV_TARGET {
+					return float4(unpackARGB(input.color));
+				}
+			)";
+			debug = false;
+			break;
+		}
+		else {
+			std::cout << "\nInvalid answer.\n";
+		}
+	}
+
 	std::cout << "\n";
 
 	unsigned int flags0_device_creation = 0;
@@ -402,7 +437,7 @@ int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_
 	window = CreateWindowExW(0, lp_class_name, L"HI-Z occlusion culler", WS_OVERLAPPEDWINDOW, 0, 0, width, height, 0, 0, 0, 0);
 	ShowWindow(window, n_cmd_show);
 
-	std::vector<unsigned int> compressed_vertices = compress_vertices(load_vertices("hello.world", num_triangles, threads_used));
+	std::vector<unsigned int> compressed_vertices = compress_vertices(read_f32_file("hello.bin", num_triangles, threads_used));
 	std::cout << "triangles loaded: " << compressed_vertices.size() / 9 << "\n";
 
 	hzb_culler.emplace(device, ctx, debug, num_triangles);
@@ -626,6 +661,9 @@ int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_
 	UINT groups_x = min(total_groups, 65535u);
 	UINT groups_y = (total_groups + groups_x - 1) / groups_x;
 
+	CullGpuTimer cull_timer;
+	cull_timer.init(device.Get());
+
 	// The compute shader takes vertex_staging_SRV -> vertex_buffer_UAV
 
 	if (occlusion) {
@@ -641,9 +679,11 @@ int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_
 
 			ctx->CSSetUnorderedAccessViews(0, 1, &null_uav, nullptr);
 			ctx->CSSetShaderResources(0, 1, &null_srv);
-
-			std::vector<ID3D11ShaderResourceView*> render_SRVs = hzb_culler->cull(vertex_buffer_SRV, dispatchX, ps, clear_color, width, height, DSV_return_resize, RTV);
-
+			//
+			cull_timer.begin(ctx.Get());
+			std::vector<ID3D11ShaderResourceView*> render_SRVs = hzb_culler->cull(vertex_buffer_SRV, dispatchX, ps, clear_color, width, height, DSV_return_resize, RTV, cull_timer);
+			cull_timer.end(ctx.Get());
+			//
 			ctx->VSSetShaderResources(0, static_cast<unsigned int>(render_SRVs.size()), render_SRVs.data());
 			ctx->PSSetShader(ps.Get(), nullptr, 0);
 			ctx->OMSetRenderTargets(1, RTV.GetAddressOf(), DSV.Get());
@@ -655,7 +695,12 @@ int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_
 			high_resolution_clock end = std::chrono::high_resolution_clock::now();
 
 			FPSReturn fps = fps_counter.check_fps();
-			if (fps.second) SetWindowTextA(window, std::to_string(std::chrono::duration<double, std::milli>(end - start).count()).c_str());
+			if (fps.second) {
+				double cpu_ms = std::chrono::duration<double, std::milli>(end - start).count();
+				std::string title = "Total: " + std::to_string(cpu_ms) +
+					" ms | GPU cull: " + std::to_string(cull_timer.cull_ms) + " ms";
+				SetWindowTextA(window, title.c_str());
+			}
 		}
 	}
 	else {
