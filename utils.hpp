@@ -167,6 +167,81 @@ std::vector<float> load_vertices(const char* path, unsigned long long num_triang
     return result;
 }
 
+std::vector<float> read_f32_file(const std::string& filename, unsigned int count, unsigned int kThreads) {
+    if (kThreads == 0) {
+        kThreads = static_cast<unsigned int>(find_cores());
+        if (kThreads == 0) kThreads = 4;
+    }
+
+    // Multiply in size_t so large counts don't overflow unsigned int
+    const std::size_t total = static_cast<std::size_t>(count) * 21u;
+    std::vector<float> out(total);
+    if (total == 0) return out;
+
+    // Make sure the file exists and holds enough floats
+    {
+        std::ifstream probe(filename, std::ios::binary | std::ios::ate);
+        if (!probe) throw std::runtime_error("read_f32_file: cannot open " + filename);
+        const std::uint64_t fileBytes = static_cast<std::uint64_t>(probe.tellg());
+        const std::uint64_t needBytes = static_cast<std::uint64_t>(total) * sizeof(float);
+        if (fileBytes < needBytes)
+            throw std::runtime_error("read_f32_file: " + filename + " has " +
+                std::to_string(fileBytes / sizeof(float)) + " floats, but " +
+                std::to_string(total) + " were requested");
+    }
+
+    // Don't use more threads than there is work for (at least ~64K floats per thread)
+    const std::size_t minPerThread = 1u << 16;
+    const std::size_t maxUseful = std::max<std::size_t>(1, total / minPerThread);
+    const unsigned int nThreads = static_cast<unsigned int>(std::min<std::size_t>(kThreads, maxUseful));
+
+    // File is little-endian; swap bytes only on a big-endian machine
+    const std::uint32_t one = 1;
+    unsigned char firstByte;
+    std::memcpy(&firstByte, &one, 1);
+    const bool needSwap = (firstByte != 1);
+
+    std::vector<char> failed(nThreads, 0); // char, not bool: vector<bool> isn't thread-safe per element
+
+    auto worker = [&](unsigned int t) {
+        // Split evenly; the first (total % nThreads) chunks get one extra float
+        const std::size_t base = total / nThreads, extra = total % nThreads;
+        const std::size_t begin = t * base + std::min<std::size_t>(t, extra);
+        const std::size_t len = base + (t < extra ? 1 : 0);
+
+        std::ifstream in(filename, std::ios::binary); // each thread gets its own stream
+        if (!in) { failed[t] = 1; return; }
+        in.seekg(static_cast<std::streamoff>(begin * sizeof(float)), std::ios::beg);
+        in.read(reinterpret_cast<char*>(out.data() + begin), static_cast<std::streamsize>(len * sizeof(float)));
+        if (static_cast<std::size_t>(in.gcount()) != len * sizeof(float)) { failed[t] = 1; return; }
+
+        if (needSwap) {
+            float* p = out.data() + begin;
+            for (std::size_t i = 0; i < len; ++i) {
+                std::uint32_t u;
+                std::memcpy(&u, &p[i], 4);
+                u = (u >> 24) | ((u >> 8) & 0x0000FF00u) | ((u << 8) & 0x00FF0000u) | (u << 24);
+                std::memcpy(&p[i], &u, 4);
+            }
+        }
+        };
+
+    if (nThreads == 1) {
+        worker(0);
+    }
+    else {
+        std::vector<std::thread> pool;
+        pool.reserve(nThreads);
+        for (unsigned int t = 0; t < nThreads; ++t) pool.emplace_back(worker, t);
+        for (auto& th : pool) th.join();
+    }
+
+    for (unsigned int t = 0; t < nThreads; ++t)
+        if (failed[t]) throw std::runtime_error("read_f32_file: read failed in " + filename);
+
+    return out;
+}
+
 //
 // NOT BF16
 //
@@ -792,3 +867,61 @@ bool is_int(std::string_view str) {
     // Valid if there are no errors (like overflow) and the whole string was parsed
     return ec == std::errc() && ptr == str.data() + str.size();
 }
+
+#include <d3d11.h>
+
+struct CullGpuTimer
+{
+    static constexpr UINT FRAMES = 5;
+
+    struct Slot {
+        ComPtr<ID3D11Query> disjoint, ts_begin, ts_end;
+        bool pending = false;
+    };
+
+    Slot   slots[FRAMES];
+    UINT   index = 0;
+    double cull_ms = 0.0; // GPU time of everything inside cull()
+
+    void init(ID3D11Device* device)
+    {
+        D3D11_QUERY_DESC desc{};
+        for (Slot& s : slots) {
+            desc.Query = D3D11_QUERY_TIMESTAMP_DISJOINT;
+            device->CreateQuery(&desc, &s.disjoint);
+            desc.Query = D3D11_QUERY_TIMESTAMP;
+            device->CreateQuery(&desc, &s.ts_begin);
+            device->CreateQuery(&desc, &s.ts_end);
+        }
+    }
+
+    void begin(ID3D11DeviceContext* ctx)
+    {
+        Slot& s = slots[index];
+        if (s.pending) { read(ctx, s); s.pending = false; }
+        ctx->Begin(s.disjoint.Get());
+        ctx->End(s.ts_begin.Get());
+    }
+
+    void end(ID3D11DeviceContext* ctx)
+    {
+        Slot& s = slots[index];
+        ctx->End(s.ts_end.Get());
+        ctx->End(s.disjoint.Get());
+        s.pending = true;
+        index = (index + 1) % FRAMES;
+    }
+
+private:
+    void read(ID3D11DeviceContext* ctx, Slot& s)
+    {
+        const UINT f = D3D11_ASYNC_GETDATA_DONOTFLUSH;
+        D3D11_QUERY_DATA_TIMESTAMP_DISJOINT dj{};
+        UINT64 t0 = 0, t1 = 0;
+        if (ctx->GetData(s.disjoint.Get(), &dj, sizeof(dj), f) != S_OK) return;
+        if (ctx->GetData(s.ts_begin.Get(), &t0, sizeof(t0), f) != S_OK) return;
+        if (ctx->GetData(s.ts_end.Get(), &t1, sizeof(t1), f) != S_OK) return;
+        if (dj.Disjoint || dj.Frequency == 0) return;
+        cull_ms = static_cast<double>(t1 - t0) * 1000.0 / static_cast<double>(dj.Frequency);
+    }
+};
