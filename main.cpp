@@ -181,7 +181,8 @@ int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_
 			std::cout << "\nnum_triangles set to " << answer << "\n";
 			num_triangles = std::stoi(answer);
 			break;
-		} else {
+		}
+		else {
 			std::cout << "\nInvalid answer.\n";
 		}
 	}
@@ -444,7 +445,7 @@ int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_
 
 	D3D11_SUBRESOURCE_DATA vertex_buffer_data = {};
 	vertex_buffer_data.pSysMem = compressed_vertices.data();
-	
+
 	ComPtr<ID3D11Buffer> vertex_buffer;
 	D3D11_BUFFER_DESC vertex_buffer_desc = {};
 	vertex_buffer_desc.ByteWidth = static_cast<unsigned int>(sizeof(float)) * (compressed_vertices.size());
@@ -478,7 +479,7 @@ int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_
 
 	ComPtr<ID3D11ShaderResourceView> vertex_staging_SRV;
 	device->CreateShaderResourceView(vertex_staging_buffer.Get(), &vertex_buffer_SRV_desc, &vertex_staging_SRV);
-	
+
 	ComPtr<ID3D11UnorderedAccessView> vertex_buffer_UAV;
 	D3D11_UNORDERED_ACCESS_VIEW_DESC vertex_buffer_UAV_desc = {};
 	vertex_buffer_UAV_desc.Buffer.FirstElement = 0;
@@ -508,15 +509,15 @@ int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_
 
 	KILLCOMPTRREF
 		DSV_return DSV_return_ = create_DSV(width, height, device);
-		DSV_tex = DSV_return_.DSV_tex;
-		DSV = DSV_return_.DSV;
+	DSV_tex = DSV_return_.DSV_tex;
+	DSV = DSV_return_.DSV;
 
-		swapchain_return swapchain_rtv = create_swapchain(width, height, window, factory, device);
-		swapchain = swapchain_rtv.swpachain;
-		RTV = swapchain_rtv.RTV;
+	swapchain_return swapchain_rtv = create_swapchain(width, height, window, factory, device);
+	swapchain = swapchain_rtv.swpachain;
+	RTV = swapchain_rtv.RTV;
 	EXITKILL
 
-	DSV_return_resize = { DSV_tex, DSV }; 
+		DSV_return_resize = { DSV_tex, DSV };
 	hzb_culler->create_reset_dimensions_buffer(width, height);
 
 	FPSCounter fps_counter{};
@@ -642,7 +643,6 @@ int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_
 
 			vertices_out[vertex_ID]     = pack_float2_to_half2(screen);
 			vertices_out[vertex_ID + 1] = asuint(depth);
-			vertices_out[vertex_ID + 2] = vertices_in[vertex_ID + 2];
 		}
 	)";
 
@@ -666,12 +666,13 @@ int WinMain([[maybe_unused]] HINSTANCE h_instance, [[maybe_unused]] HINSTANCE p_
 
 	// The compute shader takes vertex_staging_SRV -> vertex_buffer_UAV
 
+	ctx->CopyResource(vertex_buffer.Get(), vertex_staging_buffer.Get());
 	if (occlusion) {
 		while (running) {
 			high_resolution_clock start = std::chrono::high_resolution_clock::now();
 			send_message(msg);
 			unsigned int num_mips = static_cast<unsigned int>(ceil(log2(static_cast<float>(min(width, height)))));
-			
+
 			ctx->CSSetShader(cs.Get(), nullptr, 0);
 			ctx->CSSetUnorderedAccessViews(0, 1, vertex_buffer_UAV.GetAddressOf(), nullptr);
 			ctx->CSSetShaderResources(0, 1, vertex_staging_SRV.GetAddressOf());
