@@ -136,13 +136,14 @@ public:
 		status_buffer_SRV = status_buffer_return.status_buffer_SRV;
 	}
 
-	std::vector<ID3D11ShaderResourceView*> cull(ComPtr<ID3D11ShaderResourceView> vertex_buffer_SRV, unsigned int dispatchX, ComPtr<ID3D11PixelShader> ps, float* clear_color, unsigned int width, unsigned int height, DSV_return DSV_struct, ComPtr<ID3D11RenderTargetView> RTV) {
+	std::vector<ID3D11ShaderResourceView*> cull(ComPtr<ID3D11ShaderResourceView> vertex_buffer_SRV, unsigned int dispatchX, ComPtr<ID3D11PixelShader> ps, float* clear_color, unsigned int width, unsigned int height, DSV_return DSV_struct, ComPtr<ID3D11RenderTargetView> RTV, CullGpuTimer& cull_timer) {
 		unsigned int num_mips = static_cast<unsigned int>(ceil(log2(static_cast<float>(min(width, height)))));
 		std::vector<ID3D11ShaderResourceView*> render_SRVs = { vertex_buffer_SRV.Get(), status_buffer_SRV.Get() };
 		std::vector<ID3D11ShaderResourceView*> cull_SRVs = { HIZ_full_SRV.Get(), vertex_buffer_SRV.Get() };
 		ComPtr<ID3D11DepthStencilView> DSV = DSV_struct.DSV;
 		ComPtr<ID3D11Texture2D> DSV_tex = DSV_struct.DSV_tex;
 
+		// ~3.85ms arc 64eu, 5m, no nebula
 		for (unsigned int i = 0; i < HIZ_buffer_texture_SRVs.size(); i++) {
 			render_SRVs.push_back(HIZ_buffer_texture_SRVs.at(i).Get());
 		}
@@ -161,6 +162,8 @@ public:
 		ctx->OMSetRenderTargets(1, RTV.GetAddressOf(), DSV.Get()); // Check if I NEED AN RTV
 		ctx->DrawInstancedIndirect(indirect_buf.Get(), 0);
 		ctx->OMSetRenderTargets(0, nullptr, nullptr); // unbind DSV first
+		
+		// ~0.46ms arc 64eu, 5m, no nebula
 		ctx->CopySubresourceRegion(
 			HIZ_buffer_texture.Get(),  // dst
 			0,              // dst subresource (mip 0)
@@ -186,6 +189,8 @@ public:
 			);
 		}
 		ctx->VSSetShaderResources(0, 2, nullSRVs);
+
+		// ~3.8ms arc 64eu, 5m, no nebula
 		ctx->CSSetShader(cull_shader.Get(), nullptr, 0);
 		ctx->CSSetShaderResources(0, static_cast<unsigned int>(cull_SRVs.size()), cull_SRVs.data());
 		ctx->CSSetUnorderedAccessViews(0, 1, status_buffer_UAV.GetAddressOf(), &zero);
